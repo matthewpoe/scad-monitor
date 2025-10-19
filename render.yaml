@@ -5,18 +5,38 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python web_interface.py
-    disk:
-      name: monitor-data
-      mountPath: /data
-      sizeGB: 1
+    envVars:
+      # These are FREE and persist between restarts
+      - key: PUSHOVER_USER_KEY
+        sync: false
+      - key: PUSHOVER_APP_TOKEN
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: NOTIFY_EMAIL
+        sync: false
+      - key: PROXY_API_KEY
+        sync: false
 
-  # Monitor Worker - Runs 24/7 checking tickets
+  # Monitor Worker - Runs 24/7 checking tickets  
   - type: worker
     name: scad-monitor
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python monitor.py
-    disk:
-      name: monitor-data
-      mountPath: /data
-      sizeGB: 1
+    envVars:
+      # Shared with web interface
+      - key: PUSHOVER_USER_KEY
+        sync: false
+      - key: PUSHOVER_APP_TOKEN
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: NOTIFY_EMAIL
+        sync: false
+      - key: PROXY_API_KEY
+        sync: false
