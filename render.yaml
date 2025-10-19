@@ -6,7 +6,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python web_interface.py
     envVars:
-      # These are FREE and persist between restarts
       - key: PUSHOVER_USER_KEY
         sync: false
       - key: PUSHOVER_APP_TOKEN
@@ -27,7 +26,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python monitor.py
     envVars:
-      # Shared with web interface
       - key: PUSHOVER_USER_KEY
         sync: false
       - key: PUSHOVER_APP_TOKEN
