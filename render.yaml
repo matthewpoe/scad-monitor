@@ -5,10 +5,10 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python web_interface.py
-    envVars:
-      - key: PORT
-        value: 5000
-    # This will give you a public URL like: scad-monitor-web.onrender.com
+    disk:
+      name: monitor-data
+      mountPath: /data
+      sizeGB: 1
 
   # Monitor Worker - Runs 24/7 checking tickets
   - type: worker
@@ -16,10 +16,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python monitor.py
-    # Worker runs continuously in background
-    
-  # Shared disk for config/state files
-  disk:
-    name: monitor-data
-    mountPath: /data
-    sizeGB: 1
+    disk:
+      name: monitor-data
+      mountPath: /data
+      sizeGB: 1
