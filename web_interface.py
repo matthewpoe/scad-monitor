@@ -75,6 +75,7 @@ def fetch_all_events():
     # Check cache first
     cached = load_events_cache()
     if cached:
+        print(f"Returning {len(cached)} events from cache")
         return cached
     
     try:
@@ -83,13 +84,33 @@ def fetch_all_events():
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        response = requests.get(url, headers=headers, timeout=30)
+        # Check if we should use ScraperAPI
+        proxy_api_key = os.getenv('PROXY_API_KEY')
+        
+        if proxy_api_key:
+            print(f"Using ScraperAPI with key: {proxy_api_key[:10]}...")
+            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}'
+            print(f"Fetching from: {proxy_url[:80]}...")
+            response = requests.get(proxy_url, headers=headers, timeout=60)
+        else:
+            print(f"Fetching directly from: {url}")
+            response = requests.get(url, headers=headers, timeout=60)
+        
+        print(f"Response status: {response.status_code}")
+        print(f"Response length: {len(response.text)} characters")
+        
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         events = []
         
         event_items = soup.find_all('li', class_='tn-prod-list-item')
+        print(f"Found {len(event_items)} event items in HTML")
+        
+        if len(event_items) == 0:
+            print("⚠️ No event items found! HTML structure may have changed.")
+            print("First 500 chars of response:")
+            print(response.text[:500])
         
         for item in event_items:
             try:
@@ -162,20 +183,27 @@ def fetch_all_events():
                             'status': status
                         })
                     except Exception as e:
+                        print(f"Error parsing performance: {e}")
                         continue
                         
             except Exception as e:
+                print(f"Error parsing event item: {e}")
                 continue
         
         # Sort by date
         events.sort(key=lambda x: x['date'] if x['date'] else '9999')
         
+        print(f"✅ Successfully parsed {len(events)} events")
+        
         # Cache the results
-        save_events_cache(events)
+        if len(events) > 0:
+            save_events_cache(events)
         
         return events
     except Exception as e:
-        print(f"Error fetching events: {e}")
+        print(f"❌ Error fetching events: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def check_conflicts(events, monitored_ids, purchased_ids):
