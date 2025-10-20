@@ -954,38 +954,43 @@ HTML_TEMPLATE = '''
         }
         
         function createEventCard(event) {
-            const isMonitored = config.monitored_events.includes(event.id);
-            const isPurchased = config.purchased_events.includes(event.id);
-            
-            let cardClass = 'event-card';
-            if (isPurchased) cardClass += ' purchased';
-            else if (isMonitored) cardClass += ' monitored';
-            
-            const statusClass = event.status === 'available' ? 'status-available' : 'status-sold-out';
-            const statusText = event.status === 'available' ? '✓ Available' : '✗ Sold Out';
-            
-            return `
-                <div class="${cardClass}">
-                    ${event.image_url ? `<img src="${event.image_url}" class="event-image" alt="${event.title}">` : ''}
-                    <div class="event-content">
-                        <div class="event-title">${event.title}</div>
-                        <div class="event-datetime">📅 ${event.datetime_text}</div>
-                        <div class="event-status ${statusClass}">${statusText}</div>
-                        <div class="event-actions">
-                            <button class="action-btn ${isMonitored ? 'active' : ''}" 
-                                    onclick="toggleMonitor('${event.id}')" 
-                                    ${isPurchased ? 'disabled' : ''}>
-                                ${isMonitored ? '👁️ Monitoring' : '👁️ Monitor'}
-                            </button>
-                            <button class="action-btn purchased-btn ${isPurchased ? 'active' : ''}" 
-                                    onclick="togglePurchased('${event.id}')">
-                                ${isPurchased ? '✓ Purchased' : '🎫 Purchased?'}
-                            </button>
-                        </div>
-                    </div>
+    const isMonitored = config.monitored_events.includes(event.id);
+    const isPurchased = config.purchased_events.includes(event.id);
+    
+    let cardClass = 'event-card';
+    if (isPurchased) cardClass += ' purchased';
+    else if (isMonitored) cardClass += ' monitored';
+    
+    const statusClass = event.status === 'available' ? 'status-available' : 'status-sold-out';
+    const statusText = event.status === 'available' ? '✓ Available' : '✗ Sold Out';
+    
+    return `
+        <div class="${cardClass}">
+            ${event.image_url ? `<img src="${event.image_url}" class="event-image" alt="${event.title}">` : ''}
+            <div class="event-content">
+                <div class="event-title">${event.title}</div>
+                <div class="event-datetime">📅 ${event.datetime_text}</div>
+                <div class="event-status ${statusClass}">${statusText}</div>
+                <div class="event-actions">
+                    <button class="action-btn ${isMonitored ? 'active' : ''}" 
+                            onclick="toggleMonitor('${event.id}')" 
+                            ${isPurchased ? 'disabled' : ''}>
+                        ${isMonitored ? '👁️ Monitoring' : '👁️ Monitor'}
+                    </button>
+                    <button class="action-btn purchased-btn ${isPurchased ? 'active' : ''}" 
+                            onclick="togglePurchased('${event.id}')">
+                        ${isPurchased ? '✓ Purchased' : '🎫 Purchased?'}
+                    </button>
+                    ${event.url ? `
+                    <a href="${event.url}" target="_blank" class="action-btn" style="text-decoration: none; display: block; text-align: center;">
+                        🎟️ Get Tickets
+                    </a>
+                    ` : ''}
                 </div>
-            `;
-        }
+            </div>
+        </div>
+    `;
+}
         
         function toggleMonitor(eventId) {
             const index = config.monitored_events.indexOf(eventId);
