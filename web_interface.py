@@ -356,10 +356,12 @@ def check_conflicts(events, monitored_ids, purchased_ids):
                 dt1 = datetime.fromisoformat(date1)
                 dt2 = datetime.fromisoformat(date2)
 
-                # Check if events overlap (within 3 hours of each other)
+                # Check if events overlap
+                # Assume each event is 2.5 hours long (150 minutes)
+                # Events conflict if start times are within 150 minutes of each other
                 time_diff = abs((dt1 - dt2).total_seconds() / 60)
 
-                if time_diff < 180:  # 3 hours
+                if time_diff < 150:  # 2.5 hours
                     severity = 'critical' if (id1 in purchased_ids and id2 in purchased_ids) else \
                         'warning' if (id1 in purchased_ids or id2 in purchased_ids) else \
                             'info'
@@ -1156,6 +1158,17 @@ HTML_TEMPLATE = '''
 
             if (conflicts.length > 0) {
                 cardClass += ' has-conflict';
+
+                // Separate purchased and monitored conflicts
+                const purchasedConflicts = conflicts.filter(c => {
+                    const otherEvent = c.event1.id === event.id ? c.event2 : c.event1;
+                    return config.purchased_events.includes(otherEvent.id);
+                });
+                const monitoredConflicts = conflicts.filter(c => {
+                    const otherEvent = c.event1.id === event.id ? c.event2 : c.event1;
+                    return !config.purchased_events.includes(otherEvent.id);
+                });
+
                 const highestSeverity = conflicts.reduce((max, c) => {
                     const levels = { 'critical': 3, 'warning': 2, 'info': 1 };
                     return (levels[c.severity] > levels[max]) ? c.severity : max;
@@ -1169,21 +1182,50 @@ HTML_TEMPLATE = '''
 
                 conflictBadge = `<div class="conflict-badge ${highestSeverity}">${icons[highestSeverity]} ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''}</div>`;
 
-                // Show details for each conflict
-                conflictDetails = conflicts.map(conflict => {
+                // Always show purchased conflicts
+                const purchasedDetails = purchasedConflicts.map(conflict => {
                     const otherEvent = conflict.event1.id === event.id ? conflict.event2 : conflict.event1;
-                    const isPurchasedConflict = config.purchased_events.includes(otherEvent.id);
-                    const label = isPurchasedConflict ? 'PURCHASED' : 'Monitored';
-
                     return `
                         <div class="conflict-details-mini ${conflict.severity}">
                             <strong>${icons[conflict.severity]} Conflicts with:</strong><br>
                             ${otherEvent.title}<br>
-                            <small>${otherEvent.datetime_text} (${label})</small><br>
+                            <small>${otherEvent.datetime_text} (PURCHASED)</small><br>
                             <small>${conflict.time_diff_minutes} min apart</small>
                         </div>
                     `;
                 }).join('');
+
+                // Collapse monitored conflicts if more than 2
+                let monitoredDetails = '';
+                if (monitoredConflicts.length > 0) {
+                    if (monitoredConflicts.length <= 2) {
+                        monitoredDetails = monitoredConflicts.map(conflict => {
+                            const otherEvent = conflict.event1.id === event.id ? conflict.event2 : conflict.event1;
+                            return `
+                                <div class="conflict-details-mini info">
+                                    <strong>ℹ️ Conflicts with:</strong><br>
+                                    ${otherEvent.title}<br>
+                                    <small>${otherEvent.datetime_text} (Monitored)</small><br>
+                                    <small>${conflict.time_diff_minutes} min apart</small>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        // Collapsed view
+                        const titles = monitoredConflicts.map(c => {
+                            const otherEvent = c.event1.id === event.id ? c.event2 : c.event1;
+                            return otherEvent.title;
+                        }).join(', ');
+                        monitoredDetails = `
+                            <div class="conflict-details-mini info">
+                                <strong>ℹ️ ${monitoredConflicts.length} monitored conflicts:</strong><br>
+                                <small>${titles}</small>
+                            </div>
+                        `;
+                    }
+                }
+
+                conflictDetails = purchasedDetails + monitoredDetails;
             }
 
             return `

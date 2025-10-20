@@ -8,6 +8,7 @@ from email.mime.multipart import MIMEMultipart
 import os
 from datetime import datetime, timedelta
 import json
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -324,9 +325,15 @@ class TicketMonitor:
     def send_pushover_notification(self, title, message, url, priority=0):
         """Send notification via Pushover"""
         if not self.pushover_user_key or not self.pushover_app_token:
+            print("  ⚠️  Pushover not configured (missing user key or app token)")
             return False
 
         try:
+            print(f"  📤 Sending Pushover notification...")
+            print(f"     Title: {title}")
+            print(f"     User Key: {self.pushover_user_key[:8]}...")
+            print(f"     App Token: {self.pushover_app_token[:8]}...")
+
             response = requests.post(
                 'https://api.pushover.net/1/messages.json',
                 data={
@@ -340,9 +347,21 @@ class TicketMonitor:
                 },
                 timeout=10
             )
-            return response.status_code == 200
+
+            print(f"     Response status: {response.status_code}")
+            print(f"     Response body: {response.text}")
+
+            if response.status_code == 200:
+                print("  ✅ Pushover notification sent successfully!")
+                return True
+            else:
+                print(f"  ❌ Pushover notification failed: {response.text}")
+                return False
+
         except Exception as e:
-            print(f"Error sending Pushover notification: {e}")
+            print(f"  ❌ Error sending Pushover notification: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def send_email_notification(self, subject, body, url, event_title):
@@ -406,6 +425,9 @@ class TicketMonitor:
 
     def send_test_notification(self, stats):
         """Send a test notification with monitoring stats"""
+        print("\n📤 Sending test notification...")
+        print(f"   Pushover configured: {bool(self.pushover_user_key and self.pushover_app_token)}")
+
         title = "🧪 SCAD Monitor Test"
         message = f"""Monitor running successfully!
 
@@ -423,7 +445,9 @@ Next check in ~{self.check_interval_minutes} min"""
         pushover_sent = self.send_pushover_notification(title, message, url, priority=-1)
 
         if pushover_sent:
-            print("  ✓ Test notification sent")
+            print("  ✅ Test notification sent successfully")
+        else:
+            print("  ❌ Test notification failed")
 
         return pushover_sent
 
@@ -434,10 +458,22 @@ Next check in ~{self.check_interval_minutes} min"""
         print(f"{'=' * 70}")
 
         # Reload config to pick up any changes
+        print("📋 Reloading configuration...")
         self.config = self.load_config()
         self.monitored_events = self.config.get('monitored_events', [])
         self.notify_all_available = self.config.get('notify_all_available', False)
         self.send_test_notifications = self.config.get('send_test_notifications', False)
+
+        # Reload credentials
+        creds = self.config.get('credentials', {})
+        self.pushover_user_key = creds.get('pushover_user_key') or os.getenv('PUSHOVER_USER_KEY')
+        self.pushover_app_token = creds.get('pushover_app_token') or os.getenv('PUSHOVER_APP_TOKEN')
+
+        print(f"⚙️  Config loaded:")
+        print(f"   • Test notifications: {self.send_test_notifications}")
+        print(f"   • Notify all available: {self.notify_all_available}")
+        print(f"   • Pushover user key: {'✓' if self.pushover_user_key else '✗'}")
+        print(f"   • Pushover app token: {'✓' if self.pushover_app_token else '✗'}")
 
         # Parse the festival page
         all_events = self.parse_festival_page()
@@ -512,7 +548,7 @@ Next check in ~{self.check_interval_minutes} min"""
 
         # Send test notification if enabled
         if self.send_test_notifications:
-            print("\n📤 Sending test notification...")
+            print("\n🧪 Test notifications enabled - sending test notification...")
             stats = {
                 'monitored': active_count,
                 'available': available_count,
@@ -520,6 +556,8 @@ Next check in ~{self.check_interval_minutes} min"""
                 'passed': passed_count
             }
             self.send_test_notification(stats)
+        else:
+            print("\n💡 Tip: Enable 'Send test notification' in settings to verify Pushover is working")
 
     def run(self):
         """Run the monitor continuously"""
