@@ -89,15 +89,22 @@ def fetch_all_events():
         
         if proxy_api_key:
             print(f"Using ScraperAPI with key: {proxy_api_key[:10]}...")
-            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}'
-            print(f"Fetching from: {proxy_url[:80]}...")
-            response = requests.get(proxy_url, headers=headers, timeout=60)
+            # Add render=true to execute JavaScript and handle cookies
+            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}&render=true'
+            print(f"Fetching from ScraperAPI with JS rendering...")
+            response = requests.get(proxy_url, timeout=60)
         else:
             print(f"Fetching directly from: {url}")
             response = requests.get(url, headers=headers, timeout=60)
         
         print(f"Response status: {response.status_code}")
         print(f"Response length: {len(response.text)} characters")
+        
+        # Debug: Show more of the response to verify it's the real page
+        if 'tn-prod-list-item' not in response.text:
+            print("⚠️ Response doesn't contain expected event classes")
+            print("First 1000 characters:")
+            print(response.text[:1000])
         
         response.raise_for_status()
         
@@ -108,9 +115,10 @@ def fetch_all_events():
         print(f"Found {len(event_items)} event items in HTML")
         
         if len(event_items) == 0:
-            print("⚠️ No event items found! HTML structure may have changed.")
-            print("First 500 chars of response:")
-            print(response.text[:500])
+            print("⚠️ No event items found! Possible causes:")
+            print("  1. JavaScript challenge not bypassed")
+            print("  2. HTML structure changed")
+            print("  3. Website blocking ScraperAPI")
         
         for item in event_items:
             try:
