@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 import re
+import hashlib
+from flask import send_file
 
 app = Flask(__name__)
 
@@ -12,6 +14,7 @@ CONFIG_FILE = 'monitor_config.json'
 STATE_FILE = 'state.json'
 EVENTS_CACHE_FILE = 'events_cache.json'
 CACHE_DURATION_HOURS = 6
+IMAGE_CACHE_DIR = '/tmp/image_cache'
 
 def load_config():
     """Load configuration from file"""
@@ -168,10 +171,18 @@ def fetch_all_events():
                 # Get description if available
                 desc_elem = item.find('div', class_='tn-prod-list-item__property--description')
                 description = desc_elem.get_text(strip=True)[:200] if desc_elem else ''
-                
-                # Get image if available
+
+                # Get image if available and cache it
                 img_elem = item.find('img')
-                image_url = img_elem.get('src', '') if img_elem else ''
+                original_image_url = img_elem.get('src', '') if img_elem else ''
+
+                # Make sure image URL is absolute
+                if original_image_url and not original_image_url.startswith('http'):
+                    original_image_url = f'https://tickets.scadboxoffice.com{original_image_url}'
+
+                # Download and cache the image
+                cached_filename = download_and_cache_image(original_image_url) if original_image_url else None
+                image_url = f'/cached-image/{cached_filename}' if cached_filename else ''
                 
                 perf_items = item.find_all('li', class_='tn-prod-list-item__perf-list-item')
                 
@@ -292,6 +303,75 @@ def check_conflicts(events, monitored_ids, purchased_ids):
                 continue
     
     return conflicts
+
+def download_and_cache_image(image_url):
+    """Download and cache an image, return local path"""
+    if not image_url:
+        return None
+
+    # Create cache directory
+    os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+
+    # Generate filename from URL hash
+    filename = hashlib.md5(image_url.encode()).hexdigest()
+
+    # Determine extension from URL
+    if '.jpg' in image_url or '.jpeg' in image_url:
+        filename += '.jpg'
+    elif '.png' in image_url:
+        filename += '.png'
+    elif '.gif' in image_url:
+        filename += '.gif'
+    else:
+        filename += '.jpg'  # default
+
+    filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+
+    # If already cached, return the cached filename
+    if os.path.exists(filepath):
+        return filename
+
+    # Download and cache
+    try:
+        print(f"Downloading image: {image_url}")
+        response = requests.get(image_url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+
+        if response.status_code == 200:
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            print(f"Cached image as: {filename}")
+            return filename
+        else:
+            print(f"Failed to download image: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Error downloading image {image_url}: {e}")
+        return None
+
+
+@app.route('/cached-image/<filename>')
+def serve_cached_image(filename):
+    """Serve a cached image"""
+    # Security: only allow expected filenames (hash + extension)
+    if not filename or '..' in filename or '/' in filename:
+        return '', 404
+
+    filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+
+    if os.path.exists(filepath):
+        # Determine mimetype from extension
+        if filename.endswith('.png'):
+            mimetype = 'image/png'
+        elif filename.endswith('.gif'):
+            mimetype = 'image/gif'
+        else:
+            mimetype = 'image/jpeg'
+
+        return send_file(filepath, mimetype=mimetype)
+
+    return '', 404
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
