@@ -8,6 +8,12 @@ import re
 import hashlib
 from flask import send_file
 import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 app = Flask(__name__)
 
@@ -145,92 +151,73 @@ def parse_date(date_string):
     return None
 
 
+def get_chrome_driver():
+    """Create a headless Chrome driver"""
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--disable-software-rasterizer')
+    chrome_options.add_argument('--disable-extensions')
+    chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument(
+        'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+    # Disable automation flags
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
+
+
 def fetch_all_events():
-    """Fetch all events from SCAD website"""
+    """Fetch all events from SCAD website using Selenium"""
+    # Check cache first
     cached = load_events_cache()
     if cached:
         print(f"Returning {len(cached)} events from cache")
         return cached
 
+    driver = None
     try:
         url = 'https://tickets.scadboxoffice.com/'
-        scrapingbee_key = os.getenv('SCRAPINGBEE_API_KEY')
+        print(f"Fetching with Selenium: {url}")
 
-        if scrapingbee_key:
-            print(f"Using ScrapingBee...")
-            api_url = 'https://app.scrapingbee.com/api/v1/'
-            params = {
-                'api_key': scrapingbee_key,
-                'url': url,
-                'render_js': 'true',  # 5 credits
-                'premium_proxy': 'true',  # 10 credits
-                'country_code': 'us'
-                # Removed: 'wait' and 'wait_for' (these add +10 credits)
-            }
-            response = requests.get(api_url, params=params, timeout=90)
-            print(f"ScrapingBee response: {response.status_code}")
-            print(f"Credits used: ~15 (without wait parameters)")
-        else:
-            print("No API key, using cloudscraper...")
-            import cloudscraper
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(url, timeout=60)
+        driver = get_chrome_driver()
+        driver.get(url)
 
-        print(f"Response length: {len(response.text)} characters")
+        # Wait for events to load (up to 20 seconds)
+        print("Waiting for events to load...")
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "tn-prod-list-item"))
+        )
 
-        # More detailed debugging
-        soup = BeautifulSoup(response.text, 'html.parser')
+        print("Events loaded! Getting page source...")
 
-        # Check for different possible class names
-        checks = [
-            ('tn-prod-list-item', 'li'),
-            ('event', 'div'),
-            ('performance', 'div'),
-            ('prod-list', 'ul'),
-        ]
+        # Give it an extra second for images/etc to load
+        import time
+        time.sleep(2)
 
-        print("\n=== HTML Structure Debug ===")
-        for class_name, tag in checks:
-            found = soup.find_all(tag, class_=lambda x: x and class_name in x if x else False)
-            print(f"Found {len(found)} <{tag}> with '{class_name}' in class")
-            if len(found) > 0:
-                print(f"  Example classes: {found[0].get('class')}")
+        html = driver.page_source
+        print(f"Response length: {len(html)} characters")
 
-        # Look for any list items
-        all_li = soup.find_all('li')
-        print(f"\nTotal <li> elements: {len(all_li)}")
-        if len(all_li) > 0:
-            print(f"First <li> classes: {all_li[0].get('class')}")
-
-        # Save full HTML for inspection
-        print("\n=== Saving full HTML to check ===")
-        with open('/tmp/scad_page.html', 'w', encoding='utf-8') as f:
-            f.write(response.text)
-        print("Saved to /tmp/scad_page.html")
-
-        # Look for the actual content
-        print("\n=== Searching for common patterns ===")
-        if 'sold out' in response.text.lower():
-            print("✓ Found 'sold out' text")
-        if 'buy ticket' in response.text.lower():
-            print("✓ Found 'buy ticket' text")
-        if 'scad' in response.text.lower():
-            print("✓ Found 'scad' text")
-
+        soup = BeautifulSoup(html, 'html.parser')
         events = []
+
         event_items = soup.find_all('li', class_='tn-prod-list-item')
-        print(f"\nFound {len(event_items)} event items with exact class match")
+        print(f"Found {len(event_items)} event items")
 
         if len(event_items) == 0:
-            print("⚠️ No event items found! Possible causes:")
-            print("  1. JavaScript challenge not bypassed")
-            print("  2. HTML structure changed")
-            print("  3. Website blocking ScraperAPI")
-        
+            print("⚠️ No event items found!")
+            print("First 500 chars:", html[:500])
+            return []
+
         for item in event_items:
             try:
                 event_season_no = item.get('data-tn-prod-season-no', '')
-                
+
                 title_elem = item.find('h4', class_='tn-prod-list-item__property--heading')
                 if not title_elem:
                     continue
@@ -238,7 +225,7 @@ def fetch_all_events():
                 if not title_link:
                     continue
                 title = title_link.get_text(strip=True)
-                
+
                 # Get description if available
                 desc_elem = item.find('div', class_='tn-prod-list-item__property--description')
                 description = desc_elem.get_text(strip=True)[:200] if desc_elem else ''
@@ -254,45 +241,45 @@ def fetch_all_events():
                 # Download and cache the image
                 cached_filename = download_and_cache_image(original_image_url) if original_image_url else None
                 image_url = f'/cached-image/{cached_filename}' if cached_filename else ''
-                
+
                 perf_items = item.find_all('li', class_='tn-prod-list-item__perf-list-item')
-                
+
                 for perf in perf_items:
                     try:
                         perf_no = perf.get('data-tn-performance-no', '')
                         perf_link = perf.find('a', class_='tn-prod-list-item__perf-anchor')
                         if not perf_link:
                             continue
-                        
+
                         perf_url = perf_link.get('href', '')
                         if perf_url and not perf_url.startswith('http'):
                             perf_url = f'https://tickets.scadboxoffice.com{perf_url}'
-                        
+
                         event_id = f"{event_season_no}/{perf_no}"
-                        
+
                         date_elem = perf_link.find('span', class_='tn-prod-list-item__perf-date')
                         time_elem = perf_link.find('span', class_='tn-prod-list-item__perf-time')
-                        
+
                         date_text = date_elem.get_text(strip=True) if date_elem else None
                         time_text = time_elem.get_text(strip=True) if time_elem else None
-                        
+
                         datetime_text = f"{date_text} {time_text}" if date_text and time_text else date_text
                         event_date = parse_date(date_text) if date_text else None
-                        
+
                         status_elem = perf_link.find('span', class_='tn-prod-list-item__perf-status')
                         action_elem = perf_link.find('span', class_='tn-prod-list-item__perf-action')
-                        
+
                         if status_elem and 'Sold Out' in status_elem.get_text():
                             status = 'sold_out'
                         elif action_elem and 'Buy tickets' in action_elem.get_text():
                             status = 'available'
                         else:
                             status = 'unknown'
-                        
+
                         # Skip events that have already passed
                         if event_date and event_date < datetime.now() - timedelta(days=1):
                             continue
-                        
+
                         events.append({
                             'id': event_id,
                             'title': title,
@@ -308,26 +295,32 @@ def fetch_all_events():
                     except Exception as e:
                         print(f"Error parsing performance: {e}")
                         continue
-                        
+
             except Exception as e:
                 print(f"Error parsing event item: {e}")
                 continue
-        
+
         # Sort by date
         events.sort(key=lambda x: x['date'] if x['date'] else '9999')
-        
+
         print(f"✅ Successfully parsed {len(events)} events")
-        
+
         # Cache the results
         if len(events) > 0:
             save_events_cache(events)
-        
+
         return events
+
     except Exception as e:
         print(f"❌ Error fetching events: {e}")
         import traceback
         traceback.print_exc()
         return []
+
+    finally:
+        if driver:
+            driver.quit()
+            print("Chrome driver closed")
 
 def check_conflicts(events, monitored_ids, purchased_ids):
     """Check for time conflicts between events"""

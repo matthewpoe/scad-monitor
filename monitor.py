@@ -9,6 +9,11 @@ import os
 from datetime import datetime, timedelta
 import json
 import re
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 class TicketMonitor:
     def __init__(self):
@@ -127,38 +132,46 @@ class TicketMonitor:
             'Cache-Control': 'max-age=0',
         }
 
-    def fetch_page(self, url):
-        """Fetch page with ScrapingBee"""
-        scrapingbee_key = os.getenv('SCRAPINGBEE_API_KEY')
+    def get_chrome_driver(self):
+        """Create a headless Chrome driver"""
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        if scrapingbee_key:
-            try:
-                api_url = 'https://app.scrapingbee.com/api/v1/'
-                params = {
-                    'api_key': scrapingbee_key,
-                    'url': url,
-                    'render_js': 'true',
-                    'premium_proxy': 'true',
-                    'country_code': 'us'
-                }
-                response = requests.get(api_url, params=params, timeout=60)
-                response.raise_for_status()
-                return response.text
-            except Exception as e:
-                print(f"ScrapingBee error: {e}")
-                return None
-        else:
-            # Fallback to cloudscraper
-            import cloudscraper
-            try:
-                scraper = cloudscraper.create_scraper()
-                response = scraper.get(url, timeout=60)
-                response.raise_for_status()
-                return response.text
-            except Exception as e:
-                print(f"Error fetching {url}: {e}")
-                return None
-    
+        return webdriver.Chrome(options=chrome_options)
+
+    def fetch_page(self, url):
+        """Fetch page with Selenium"""
+        driver = None
+        try:
+            print(f"Fetching {url} with Selenium...")
+            driver = self.get_chrome_driver()
+            driver.get(url)
+
+            # Wait for content
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "tn-prod-list-item"))
+            )
+
+            import time
+            time.sleep(2)
+
+            html = driver.page_source
+            return html
+
+        except Exception as e:
+            print(f"Error fetching {url}: {e}")
+            return None
+
+        finally:
+            if driver:
+                driver.quit()
+
     def parse_date(self, date_string):
         """Parse event date from SCAD format"""
         if not date_string:
