@@ -409,11 +409,13 @@ class TicketMonitor:
         if is_new:
             title = f"SCAD Tickets Available!"
             message = f"{event['title']} ({event['datetime_text']}) - Tickets just became available!"
+            priority = 0  # Normal priority - respects silent mode
         else:
             title = f"SCAD Tickets Still Available"
             message = f"{event['title']} ({event['datetime_text']}) - Tickets are available!"
+            priority = 0  # Normal priority
 
-        pushover_sent = self.send_pushover_notification(title, message, event['url'])
+        pushover_sent = self.send_pushover_notification(title, message, event['url'], priority=priority)
         email_sent = self.send_email_notification(title, message, event['url'], event['title'])
 
         if pushover_sent:
