@@ -70,50 +70,52 @@ def parse_date(date_string):
         pass
     return None
 
+
 def fetch_all_events():
     """Fetch all events from SCAD website"""
-    # Check cache first
     cached = load_events_cache()
     if cached:
         print(f"Returning {len(cached)} events from cache")
         return cached
-    
+
     try:
         url = 'https://tickets.scadboxoffice.com/'
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        # Check if we should use ScraperAPI
-        proxy_api_key = os.getenv('PROXY_API_KEY')
+        scrapingbee_key = os.getenv('SCRAPINGBEE_API_KEY')
 
-        if proxy_api_key:
-            print(f"Using ScraperAPI with key: {proxy_api_key[:10]}...")
-            # Add premium=true for protected domains
-            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}&render=true&premium=true'
-            print(f"Fetching from ScraperAPI with JS rendering (premium mode)...")
-            response = requests.get(proxy_url, timeout=60)
+        if scrapingbee_key:
+            print(f"Using ScrapingBee...")
+            api_url = 'https://app.scrapingbee.com/api/v1/'
+            params = {
+                'api_key': scrapingbee_key,
+                'url': url,
+                'render_js': 'true',
+                'premium_proxy': 'true',  # IP rotation
+                'country_code': 'us'
+            }
+            response = requests.get(api_url, params=params, timeout=60)
+            print(f"ScrapingBee response: {response.status_code}")
         else:
-            print(f"Fetching directly from: {url}")
-            response = requests.get(url, headers=headers, timeout=60)
-        
-        print(f"Response status: {response.status_code}")
+            print("No API key, using cloudscraper...")
+            import cloudscraper
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(url, timeout=60)
+
         print(f"Response length: {len(response.text)} characters")
-        
-        # Debug: Show more of the response to verify it's the real page
-        if 'tn-prod-list-item' not in response.text:
-            print("⚠️ Response doesn't contain expected event classes")
-            print("First 1000 characters:")
-            print(response.text[:1000])
-        
+
+        if 'tn-prod-list-item' in response.text:
+            print("✓ Found event classes!")
+        else:
+            print("⚠️ No event classes found")
+            print("First 500 chars:", response.text[:500])
+
         response.raise_for_status()
-        
+
         soup = BeautifulSoup(response.text, 'html.parser')
         events = []
-        
+
         event_items = soup.find_all('li', class_='tn-prod-list-item')
-        print(f"Found {len(event_items)} event items in HTML")
-        
+        print(f"Found {len(event_items)} event items")
+
         if len(event_items) == 0:
             print("⚠️ No event items found! Possible causes:")
             print("  1. JavaScript challenge not bypassed")

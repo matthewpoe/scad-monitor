@@ -102,20 +102,36 @@ class TicketMonitor:
         }
 
     def fetch_page(self, url):
-        """Fetch page with proxy rotation if enabled"""
-        try:
-            if self.proxy_api_key:
-                proxy_url = f'http://api.scraperapi.com?api_key={self.proxy_api_key}&url={url}&render=true&premium=true'
-                response = requests.get(proxy_url, timeout=60)
-            else:
-                headers = self.get_random_headers()
-                response = requests.get(url, headers=headers, timeout=60)
+        """Fetch page with ScrapingBee"""
+        scrapingbee_key = os.getenv('SCRAPINGBEE_API_KEY')
 
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
-            return None
+        if scrapingbee_key:
+            try:
+                api_url = 'https://app.scrapingbee.com/api/v1/'
+                params = {
+                    'api_key': scrapingbee_key,
+                    'url': url,
+                    'render_js': 'true',
+                    'premium_proxy': 'true',
+                    'country_code': 'us'
+                }
+                response = requests.get(api_url, params=params, timeout=60)
+                response.raise_for_status()
+                return response.text
+            except Exception as e:
+                print(f"ScrapingBee error: {e}")
+                return None
+        else:
+            # Fallback to cloudscraper
+            import cloudscraper
+            try:
+                scraper = cloudscraper.create_scraper()
+                response = scraper.get(url, timeout=60)
+                response.raise_for_status()
+                return response.text
+            except Exception as e:
+                print(f"Error fetching {url}: {e}")
+                return None
     
     def parse_date(self, date_string):
         """Parse event date from SCAD format"""
