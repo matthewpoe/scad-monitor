@@ -4,7 +4,6 @@ import os
 from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
-import re
 import hashlib
 from flask import send_file
 import requests
@@ -42,7 +41,9 @@ def load_config():
                 'notify_email': '',
                 'proxy_api_key': ''
             },
-            'check_interval_minutes': 15
+            'check_interval_minutes': 15,
+            'send_test_notifications': False,
+            'notify_all_available': False
         }
 
     try:
@@ -77,7 +78,9 @@ def load_config():
                 'notify_email': '',
                 'proxy_api_key': ''
             },
-            'check_interval_minutes': 15
+            'check_interval_minutes': 15,
+            'send_test_notifications': False,
+            'notify_all_available': False
         }
 
 
@@ -117,6 +120,7 @@ def save_config(config):
         print(f"❌ Error saving config to Gist: {e}")
         return False
 
+
 def load_events_cache():
     """Load cached events"""
     if os.path.exists(EVENTS_CACHE_FILE):
@@ -127,6 +131,7 @@ def load_events_cache():
                 return cache.get('events', [])
     return None
 
+
 def save_events_cache(events):
     """Save events to cache"""
     with open(EVENTS_CACHE_FILE, 'w') as f:
@@ -134,6 +139,7 @@ def save_events_cache(events):
             'timestamp': datetime.now().isoformat(),
             'events': events
         }, f, indent=2)
+
 
 def parse_date(date_string):
     """Parse event date"""
@@ -322,41 +328,42 @@ def fetch_all_events():
             driver.quit()
             print("Chrome driver closed")
 
+
 def check_conflicts(events, monitored_ids, purchased_ids):
     """Check for time conflicts between events"""
     conflicts = []
-    
+
     # Create a map of event_id to event data
     event_map = {e['id']: e for e in events}
-    
+
     all_selected = monitored_ids + purchased_ids
-    
+
     for i, id1 in enumerate(all_selected):
-        for id2 in all_selected[i+1:]:
+        for id2 in all_selected[i + 1:]:
             event1 = event_map.get(id1)
             event2 = event_map.get(id2)
-            
+
             if not event1 or not event2:
                 continue
-            
+
             date1 = event1.get('date')
             date2 = event2.get('date')
-            
+
             if not date1 or not date2:
                 continue
-            
+
             try:
                 dt1 = datetime.fromisoformat(date1)
                 dt2 = datetime.fromisoformat(date2)
-                
+
                 # Check if events overlap (within 3 hours of each other)
                 time_diff = abs((dt1 - dt2).total_seconds() / 60)
-                
+
                 if time_diff < 180:  # 3 hours
                     severity = 'critical' if (id1 in purchased_ids and id2 in purchased_ids) else \
-                              'warning' if (id1 in purchased_ids or id2 in purchased_ids) else \
-                              'info'
-                    
+                        'warning' if (id1 in purchased_ids or id2 in purchased_ids) else \
+                            'info'
+
                     conflicts.append({
                         'event1': event1,
                         'event2': event2,
@@ -365,8 +372,9 @@ def check_conflicts(events, monitored_ids, purchased_ids):
                     })
             except:
                 continue
-    
+
     return conflicts
+
 
 def download_and_cache_image(image_url):
     """Download and cache an image, return local path"""
@@ -437,6 +445,7 @@ def serve_cached_image(filename):
 
     return '', 404
 
+
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
@@ -449,14 +458,14 @@ HTML_TEMPLATE = '''
             margin: 0;
             padding: 0;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
-        
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -465,25 +474,25 @@ HTML_TEMPLATE = '''
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             overflow: hidden;
         }
-        
+
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 30px;
             text-align: center;
         }
-        
+
         .header h1 {
             font-size: 2em;
             margin-bottom: 10px;
         }
-        
+
         .tabs {
             display: flex;
             background: #f8f9fa;
             border-bottom: 2px solid #e9ecef;
         }
-        
+
         .tab {
             flex: 1;
             padding: 20px;
@@ -495,26 +504,26 @@ HTML_TEMPLATE = '''
             font-weight: 500;
             transition: all 0.3s;
         }
-        
+
         .tab:hover {
             background: #e9ecef;
         }
-        
+
         .tab.active {
             background: white;
             color: #667eea;
             border-bottom: 3px solid #667eea;
         }
-        
+
         .tab-content {
             display: none;
             padding: 30px;
         }
-        
+
         .tab-content.active {
             display: block;
         }
-        
+
         .controls {
             display: flex;
             gap: 15px;
@@ -522,12 +531,12 @@ HTML_TEMPLATE = '''
             flex-wrap: wrap;
             align-items: center;
         }
-        
+
         .search-box {
             flex: 1;
             min-width: 250px;
         }
-        
+
         .search-box input {
             width: 100%;
             padding: 12px;
@@ -535,12 +544,12 @@ HTML_TEMPLATE = '''
             border-radius: 8px;
             font-size: 14px;
         }
-        
+
         .filter-buttons {
             display: flex;
             gap: 10px;
         }
-        
+
         .filter-btn {
             padding: 10px 20px;
             border: 2px solid #e9ecef;
@@ -549,13 +558,13 @@ HTML_TEMPLATE = '''
             cursor: pointer;
             transition: all 0.3s;
         }
-        
+
         .filter-btn.active {
             background: #667eea;
             color: white;
             border-color: #667eea;
         }
-        
+
         .btn {
             padding: 12px 24px;
             border: none;
@@ -565,23 +574,23 @@ HTML_TEMPLATE = '''
             font-weight: 500;
             transition: all 0.3s;
         }
-        
+
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
         }
-        
+
         .btn-success {
             background: #28a745;
             color: white;
         }
-        
+
         .events-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 20px;
         }
-        
+
         .event-card {
             background: white;
             border: 2px solid #e9ecef;
@@ -590,46 +599,101 @@ HTML_TEMPLATE = '''
             transition: all 0.3s;
             position: relative;
         }
-        
+
         .event-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0,0,0,0.1);
         }
-        
+
         .event-card.monitored {
             border-color: #667eea;
             background: #f8f9ff;
         }
-        
+
         .event-card.purchased {
             border-color: #28a745;
             background: #f0fff4;
         }
-        
+
+        .event-card.has-conflict {
+            position: relative;
+        }
+
+        .conflict-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .conflict-badge.critical {
+            background: #dc3545;
+            color: white;
+        }
+
+        .conflict-badge.warning {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .conflict-badge.info {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .conflict-details-mini {
+            font-size: 0.85em;
+            color: #dc3545;
+            margin-top: 10px;
+            padding: 8px;
+            background: #fff5f5;
+            border-radius: 6px;
+            border-left: 3px solid #dc3545;
+        }
+
+        .conflict-details-mini.warning {
+            color: #ff6b6b;
+            background: #fff9f9;
+            border-left-color: #ff6b6b;
+        }
+
+        .conflict-details-mini.info {
+            color: #856404;
+            background: #fffef5;
+            border-left-color: #ffc107;
+        }
+
         .event-image {
             width: 100%;
             height: 200px;
             object-fit: cover;
             background: #f8f9fa;
         }
-        
+
         .event-content {
             padding: 20px;
         }
-        
+
         .event-title {
             font-size: 1.1em;
             font-weight: 600;
             margin-bottom: 10px;
             color: #333;
         }
-        
+
         .event-datetime {
             color: #6c757d;
             font-size: 0.9em;
             margin-bottom: 10px;
         }
-        
+
         .event-status {
             display: inline-block;
             padding: 4px 12px;
@@ -638,22 +702,22 @@ HTML_TEMPLATE = '''
             font-weight: 600;
             margin-bottom: 15px;
         }
-        
+
         .status-available {
             background: #d4edda;
             color: #155724;
         }
-        
+
         .status-sold-out {
             background: #f8d7da;
             color: #721c24;
         }
-        
+
         .event-actions {
             display: flex;
             gap: 10px;
         }
-        
+
         .action-btn {
             flex: 1;
             padding: 10px;
@@ -664,22 +728,22 @@ HTML_TEMPLATE = '''
             font-size: 14px;
             transition: all 0.3s;
         }
-        
+
         .action-btn.active {
             border-color: #667eea;
             background: #667eea;
             color: white;
         }
-        
+
         .action-btn.purchased-btn.active {
             border-color: #28a745;
             background: #28a745;
         }
-        
+
         .conflicts-section {
             margin-bottom: 30px;
         }
-        
+
         .conflict-card {
             background: white;
             border-left: 4px solid #ffc107;
@@ -687,27 +751,27 @@ HTML_TEMPLATE = '''
             margin-bottom: 10px;
             border-radius: 8px;
         }
-        
+
         .conflict-card.critical {
             border-left-color: #dc3545;
             background: #fff5f5;
         }
-        
+
         .conflict-card.warning {
             border-left-color: #ff6b6b;
             background: #fff9f9;
         }
-        
+
         .conflict-card.info {
             border-left-color: #ffc107;
             background: #fffef5;
         }
-        
+
         .conflict-icon {
             font-size: 1.2em;
             margin-right: 10px;
         }
-        
+
         .conflict-details {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
@@ -715,26 +779,26 @@ HTML_TEMPLATE = '''
             align-items: center;
             margin-top: 10px;
         }
-        
+
         .conflict-event {
             padding: 10px;
             background: white;
             border-radius: 6px;
         }
-        
+
         .conflict-time {
             color: #dc3545;
             font-weight: 600;
             text-align: center;
         }
-        
+
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px;
             margin-bottom: 30px;
         }
-        
+
         .stat-box {
             background: white;
             padding: 20px;
@@ -742,29 +806,29 @@ HTML_TEMPLATE = '''
             text-align: center;
             border: 2px solid #e9ecef;
         }
-        
+
         .stat-number {
             font-size: 2.5em;
             font-weight: bold;
             color: #667eea;
         }
-        
+
         .stat-label {
             color: #6c757d;
             margin-top: 5px;
         }
-        
+
         .form-group {
             margin-bottom: 20px;
         }
-        
+
         label {
             display: block;
             margin-bottom: 8px;
             color: #495057;
             font-weight: 500;
         }
-        
+
         input[type="text"],
         input[type="email"],
         input[type="password"],
@@ -775,31 +839,37 @@ HTML_TEMPLATE = '''
             border-radius: 8px;
             font-size: 14px;
         }
-        
+
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
         .help-text {
             font-size: 13px;
             color: #6c757d;
             margin-top: 5px;
         }
-        
+
         .alert {
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
         }
-        
+
         .alert-info {
             background: #d1ecf1;
             color: #0c5460;
             border: 1px solid #bee5eb;
         }
-        
+
         .loading {
             text-align: center;
             padding: 40px;
             color: #6c757d;
         }
-        
+
         .spinner {
             border: 3px solid #f3f3f3;
             border-top: 3px solid #667eea;
@@ -809,21 +879,27 @@ HTML_TEMPLATE = '''
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
         }
-        
+
+        .section-divider {
+            border-top: 2px solid #e9ecef;
+            margin: 30px 0;
+            padding-top: 30px;
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
+
         @media (max-width: 768px) {
             .events-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .controls {
                 flex-direction: column;
             }
-            
+
             .search-box {
                 min-width: 100%;
             }
@@ -836,13 +912,13 @@ HTML_TEMPLATE = '''
             <h1>🎬 SCAD Ticket Monitor</h1>
             <p>Select events to monitor and manage your schedule</p>
         </div>
-        
+
         <div class="tabs">
             <button class="tab active" onclick="switchTab('browse')">Browse Events</button>
             <button class="tab" onclick="switchTab('schedule')">My Schedule</button>
             <button class="tab" onclick="switchTab('settings')">Settings</button>
         </div>
-        
+
         <div id="browse-tab" class="tab-content active">
             <div class="controls">
                 <div class="search-box">
@@ -857,15 +933,15 @@ HTML_TEMPLATE = '''
                 </div>
                 <button class="btn btn-primary" onclick="refreshEvents()">🔄 Refresh</button>
             </div>
-            
+
             <div id="events-loading" class="loading">
                 <div class="spinner"></div>
                 <p>Loading events from SCAD...</p>
             </div>
-            
+
             <div id="events-container" class="events-grid" style="display: none;"></div>
         </div>
-        
+
         <div id="schedule-tab" class="tab-content">
             <div class="stats-grid">
                 <div class="stat-box">
@@ -881,103 +957,148 @@ HTML_TEMPLATE = '''
                     <div class="stat-label">Conflicts</div>
                 </div>
             </div>
-            
+
             <div class="conflicts-section">
                 <h2 style="margin-bottom: 15px;">⚠️ Schedule Conflicts</h2>
                 <div id="conflicts-container"></div>
             </div>
-            
+
             <h2 style="margin-bottom: 15px;">📅 Your Schedule</h2>
             <div id="schedule-container"></div>
         </div>
-        
+
         <div id="settings-tab" class="tab-content">
             <h2 style="margin-bottom: 20px;">Notification Settings</h2>
-            
+
             <div class="form-group">
                 <label>Pushover User Key</label>
                 <input type="text" id="pushover_user_key" value="{{ config.credentials.pushover_user_key }}">
                 <p class="help-text">Get from pushover.net dashboard</p>
             </div>
-            
+
             <div class="form-group">
                 <label>Pushover App Token</label>
                 <input type="text" id="pushover_app_token" value="{{ config.credentials.pushover_app_token }}">
                 <p class="help-text">Create an app at pushover.net/apps</p>
             </div>
-            
+
             <div class="form-group">
                 <label>Gmail Address</label>
                 <input type="email" id="gmail_user" value="{{ config.credentials.gmail_user }}">
             </div>
-            
+
             <div class="form-group">
                 <label>Gmail App Password</label>
                 <input type="password" id="gmail_app_password" value="{{ config.credentials.gmail_app_password }}">
                 <p class="help-text">Generate at myaccount.google.com/apppasswords</p>
             </div>
-            
+
             <div class="form-group">
                 <label>Notification Email</label>
                 <input type="email" id="notify_email" value="{{ config.credentials.notify_email }}">
             </div>
-            
+
             <div class="form-group">
                 <label>ScraperAPI Key (Optional)</label>
                 <input type="text" id="proxy_api_key" value="{{ config.credentials.proxy_api_key }}">
                 <p class="help-text">For IP rotation - get from scraperapi.com</p>
             </div>
-            
+
+            <div class="section-divider"></div>
+
+            <h2 style="margin-bottom: 20px;">🧪 Testing & Notification Options</h2>
+
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="send_test_notifications" {% if config.send_test_notifications %}checked{% endif %} style="width: auto; margin-right: 10px;">
+                    <span>Send test notification on every check</span>
+                </label>
+                <p class="help-text">📤 Get a notification each time the monitor runs with stats. Great for testing! Turn off once you've confirmed notifications are working.</p>
+            </div>
+
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="notify_all_available" {% if config.notify_all_available %}checked{% endif %} style="width: auto; margin-right: 10px;">
+                    <span>Notify on all available tickets (not just newly available)</span>
+                </label>
+                <p class="help-text">🔔 Normally you only get notified when tickets become available. Enable this to get notified every check if monitored tickets are available.</p>
+            </div>
+
+            <div class="section-divider"></div>
+
+            <h2 style="margin-bottom: 20px;">⏱️ Check Interval</h2>
+
             <div class="form-group">
                 <label>Check Interval (minutes)</label>
-                <input type="number" id="check_interval" value="{{ config.check_interval_minutes }}" min="30" max="120">
+                <input type="number" id="check_interval" value="{{ config.check_interval_minutes }}" min="5" max="120">
+                <p class="help-text">How often to check for ticket availability (recommended: 15-60 minutes)</p>
             </div>
-            
-            <button class="btn btn-success" onclick="saveSettings()">Save All Settings</button>
+
+            <button class="btn btn-success" onclick="saveSettings()">💾 Save All Settings</button>
         </div>
     </div>
-    
+
     <script>
         let allEvents = [];
         let config = {{ config_json | safe }};
         let currentFilter = 'all';
         let searchTerm = '';
-        
+        let allConflicts = [];
+
         // Load events on page load
         loadEvents();
-        
+        loadConflicts();
+
         function switchTab(tabName) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            
+
             event.target.classList.add('active');
             document.getElementById(tabName + '-tab').classList.add('active');
-            
+
             if (tabName === 'schedule') {
                 updateScheduleView();
             }
         }
-        
+
         async function loadEvents() {
             document.getElementById('events-loading').style.display = 'block';
             document.getElementById('events-container').style.display = 'none';
-            
+
             try {
                 const response = await fetch('/api/events');
                 const data = await response.json();
                 allEvents = data.events;
+                await loadConflicts();
                 renderEvents();
             } catch (error) {
                 document.getElementById('events-loading').innerHTML = 
                     '<p style="color: red;">Error loading events. Please refresh.</p>';
             }
         }
-        
+
+        async function loadConflicts() {
+            try {
+                const response = await fetch('/api/conflicts');
+                const data = await response.json();
+                allConflicts = data.conflicts;
+            } catch (error) {
+                console.error('Error loading conflicts:', error);
+                allConflicts = [];
+            }
+        }
+
+        function getEventConflicts(eventId) {
+            return allConflicts.filter(conflict => 
+                conflict.event1.id === eventId || conflict.event2.id === eventId
+            );
+        }
+
         async function refreshEvents() {
             await fetch('/api/events?refresh=true');
             await loadEvents();
         }
-        
+
         function setFilter(filter) {
             currentFilter = filter;
             document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -985,77 +1106,116 @@ HTML_TEMPLATE = '''
             });
             renderEvents();
         }
-        
+
         function filterEvents() {
             searchTerm = document.getElementById('search').value.toLowerCase();
             renderEvents();
         }
-        
+
         function renderEvents() {
             const container = document.getElementById('events-container');
             container.style.display = 'grid';
             document.getElementById('events-loading').style.display = 'none';
-            
+
             let filtered = allEvents.filter(event => {
                 // Search filter
                 if (searchTerm && !event.title.toLowerCase().includes(searchTerm)) {
                     return false;
                 }
-                
+
                 // Status filter
                 const isMonitored = config.monitored_events.includes(event.id);
                 const isPurchased = config.purchased_events.includes(event.id);
-                
+
                 if (currentFilter === 'available' && event.status !== 'available') return false;
                 if (currentFilter === 'sold-out' && event.status !== 'sold_out') return false;
                 if (currentFilter === 'monitored' && !isMonitored) return false;
                 if (currentFilter === 'purchased' && !isPurchased) return false;
-                
+
                 return true;
             });
-            
+
             container.innerHTML = filtered.map(event => createEventCard(event)).join('');
         }
-        
+
         function createEventCard(event) {
-    const isMonitored = config.monitored_events.includes(event.id);
-    const isPurchased = config.purchased_events.includes(event.id);
-    
-    let cardClass = 'event-card';
-    if (isPurchased) cardClass += ' purchased';
-    else if (isMonitored) cardClass += ' monitored';
-    
-    const statusClass = event.status === 'available' ? 'status-available' : 'status-sold-out';
-    const statusText = event.status === 'available' ? '✓ Available' : '✗ Sold Out';
-    
-    return `
-        <div class="${cardClass}">
-            ${event.image_url ? `<img src="${event.image_url}" class="event-image" alt="${event.title}">` : ''}
-            <div class="event-content">
-                <div class="event-title">${event.title}</div>
-                <div class="event-datetime">📅 ${event.datetime_text}</div>
-                <div class="event-status ${statusClass}">${statusText}</div>
-                <div class="event-actions">
-                    <button class="action-btn ${isMonitored ? 'active' : ''}" 
-                            onclick="toggleMonitor('${event.id}')" 
-                            ${isPurchased ? 'disabled' : ''}>
-                        ${isMonitored ? '👁️ Monitoring' : '👁️ Monitor'}
-                    </button>
-                    <button class="action-btn purchased-btn ${isPurchased ? 'active' : ''}" 
-                            onclick="togglePurchased('${event.id}')">
-                        ${isPurchased ? '✓ Purchased' : '🎫 Purchased?'}
-                    </button>
-                    ${event.url ? `
-                    <a href="${event.url}" target="_blank" class="action-btn" style="text-decoration: none; display: block; text-align: center;">
-                        🎟️ Get Tickets
-                    </a>
-                    ` : ''}
+            const isMonitored = config.monitored_events.includes(event.id);
+            const isPurchased = config.purchased_events.includes(event.id);
+
+            let cardClass = 'event-card';
+            if (isPurchased) cardClass += ' purchased';
+            else if (isMonitored) cardClass += ' monitored';
+
+            const statusClass = event.status === 'available' ? 'status-available' : 'status-sold-out';
+            const statusText = event.status === 'available' ? '✓ Available' : '✗ Sold Out';
+
+            // Check for conflicts
+            const conflicts = getEventConflicts(event.id);
+            let conflictBadge = '';
+            let conflictDetails = '';
+
+            if (conflicts.length > 0) {
+                cardClass += ' has-conflict';
+                const highestSeverity = conflicts.reduce((max, c) => {
+                    const levels = { 'critical': 3, 'warning': 2, 'info': 1 };
+                    return (levels[c.severity] > levels[max]) ? c.severity : max;
+                }, 'info');
+
+                const icons = {
+                    'critical': '🚨',
+                    'warning': '⚠️',
+                    'info': 'ℹ️'
+                };
+
+                conflictBadge = `<div class="conflict-badge ${highestSeverity}">${icons[highestSeverity]} ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''}</div>`;
+
+                // Show details for each conflict
+                conflictDetails = conflicts.map(conflict => {
+                    const otherEvent = conflict.event1.id === event.id ? conflict.event2 : conflict.event1;
+                    const isPurchasedConflict = config.purchased_events.includes(otherEvent.id);
+                    const label = isPurchasedConflict ? 'PURCHASED' : 'Monitored';
+
+                    return `
+                        <div class="conflict-details-mini ${conflict.severity}">
+                            <strong>${icons[conflict.severity]} Conflicts with:</strong><br>
+                            ${otherEvent.title}<br>
+                            <small>${otherEvent.datetime_text} (${label})</small><br>
+                            <small>${conflict.time_diff_minutes} min apart</small>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            return `
+                <div class="${cardClass}">
+                    ${conflictBadge}
+                    ${event.image_url ? `<img src="${event.image_url}" class="event-image" alt="${event.title}">` : ''}
+                    <div class="event-content">
+                        <div class="event-title">${event.title}</div>
+                        <div class="event-datetime">📅 ${event.datetime_text}</div>
+                        <div class="event-status ${statusClass}">${statusText}</div>
+                        ${conflictDetails}
+                        <div class="event-actions">
+                            <button class="action-btn ${isMonitored ? 'active' : ''}" 
+                                    onclick="toggleMonitor('${event.id}')" 
+                                    ${isPurchased ? 'disabled' : ''}>
+                                ${isMonitored ? '👁️ Monitoring' : '👁️ Monitor'}
+                            </button>
+                            <button class="action-btn purchased-btn ${isPurchased ? 'active' : ''}" 
+                                    onclick="togglePurchased('${event.id}')">
+                                ${isPurchased ? '✓ Purchased' : '🎫 Purchased?'}
+                            </button>
+                            ${event.url ? `
+                            <a href="${event.url}" target="_blank" class="action-btn" style="text-decoration: none; display: block; text-align: center;">
+                                🎟️ Get Tickets
+                            </a>
+                            ` : ''}
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
-    `;
-}
-        
+            `;
+        }
+
         function toggleMonitor(eventId) {
             const index = config.monitored_events.indexOf(eventId);
             if (index > -1) {
@@ -1066,9 +1226,9 @@ HTML_TEMPLATE = '''
                 }
             }
             saveConfig();
-            renderEvents();
+            loadConflicts().then(() => renderEvents());
         }
-        
+
         function togglePurchased(eventId) {
             const index = config.purchased_events.indexOf(eventId);
             if (index > -1) {
@@ -1082,17 +1242,17 @@ HTML_TEMPLATE = '''
                 }
             }
             saveConfig();
-            renderEvents();
+            loadConflicts().then(() => renderEvents());
         }
-        
+
         async function updateScheduleView() {
             const response = await fetch('/api/conflicts');
             const data = await response.json();
-            
+
             document.getElementById('stat-monitoring').textContent = config.monitored_events.length;
             document.getElementById('stat-purchased').textContent = config.purchased_events.length;
             document.getElementById('stat-conflicts').textContent = data.conflicts.length;
-            
+
             const conflictsContainer = document.getElementById('conflicts-container');
             if (data.conflicts.length === 0) {
                 conflictsContainer.innerHTML = '<div class="alert alert-info">✨ No scheduling conflicts detected!</div>';
@@ -1103,13 +1263,13 @@ HTML_TEMPLATE = '''
                         'warning': '⚠️',
                         'info': 'ℹ️'
                     };
-                    
+
                     const messages = {
                         'critical': 'CRITICAL: Both events are purchased!',
                         'warning': 'WARNING: Conflict with purchased event',
                         'info': 'Potential conflict in wishlist'
                     };
-                    
+
                     return `
                         <div class="conflict-card ${conflict.severity}">
                             <div>
@@ -1140,20 +1300,20 @@ HTML_TEMPLATE = '''
                     `;
                 }).join('');
             }
-            
+
             // Render schedule
             const scheduleContainer = document.getElementById('schedule-container');
             const allScheduled = [
                 ...config.purchased_events.map(id => ({id, type: 'purchased'})),
                 ...config.monitored_events.map(id => ({id, type: 'monitored'}))
             ];
-            
+
             if (allScheduled.length === 0) {
                 scheduleContainer.innerHTML = '<div class="alert alert-info">No events selected yet. Go to Browse Events to add some!</div>';
             } else {
                 const eventMap = {};
                 allEvents.forEach(e => eventMap[e.id] = e);
-                
+
                 scheduleContainer.innerHTML = '<div class="events-grid">' + 
                     allScheduled
                         .map(item => eventMap[item.id])
@@ -1164,7 +1324,7 @@ HTML_TEMPLATE = '''
                     '</div>';
             }
         }
-        
+
         function saveConfig() {
             fetch('/api/save-config', {
                 method: 'POST',
@@ -1172,7 +1332,7 @@ HTML_TEMPLATE = '''
                 body: JSON.stringify(config)
             });
         }
-        
+
         function saveSettings() {
             config.credentials = {
                 pushover_user_key: document.getElementById('pushover_user_key').value,
@@ -1183,76 +1343,85 @@ HTML_TEMPLATE = '''
                 proxy_api_key: document.getElementById('proxy_api_key').value
             };
             config.check_interval_minutes = parseInt(document.getElementById('check_interval').value);
+            config.send_test_notifications = document.getElementById('send_test_notifications').checked;
+            config.notify_all_available = document.getElementById('notify_all_available').checked;
+
             saveConfig();
-            alert('✅ Settings saved! Restart the monitor for changes to take effect.');
+            alert('✅ Settings saved! The monitor will pick up changes on the next check cycle.');
         }
     </script>
 </body>
 </html>
 '''
 
+
 @app.route('/')
 def index():
     config = load_config()
     return render_template_string(
-        HTML_TEMPLATE, 
+        HTML_TEMPLATE,
         config=config,
         config_json=json.dumps(config)
     )
 
+
 @app.route('/api/events')
 def get_events():
     refresh = request.args.get('refresh') == 'true'
-    
+
     if refresh:
         # Force refresh by deleting cache
         if os.path.exists(EVENTS_CACHE_FILE):
             os.remove(EVENTS_CACHE_FILE)
-    
+
     events = fetch_all_events()
     return jsonify({'events': events})
+
 
 @app.route('/api/save-config', methods=['POST'])
 def save_config_api():
     config = request.json
     save_config(config)
-    
+
     # Update environment variables for the monitor
     if 'credentials' in config:
         for key, value in config['credentials'].items():
             os.environ[key.upper()] = value
-    
+
     return jsonify({'success': True})
+
 
 @app.route('/api/conflicts')
 def get_conflicts():
     config = load_config()
     events = fetch_all_events()
-    
+
     monitored = config.get('monitored_events', [])
     purchased = config.get('purchased_events', [])
-    
+
     conflicts = check_conflicts(events, monitored, purchased)
-    
+
     return jsonify({
         'conflicts': conflicts,
         'monitored_count': len(monitored),
         'purchased_count': len(purchased)
     })
 
+
 if __name__ == '__main__':
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("SCAD Ticket Monitor Web Interface")
-    print("="*70)
+    print("=" * 70)
     print("\nStarting web interface at: http://localhost:5000")
     print("\nFeatures:")
     print("  • Browse all SCAD film festival events")
     print("  • Select events to monitor for tickets")
     print("  • Mark purchased events")
     print("  • Automatic schedule conflict detection")
+    print("  • Test notifications")
     print("\nOpen this URL in your browser to get started.")
     print("Press Ctrl+C to stop the server.")
-    print("="*70 + "\n")
-    
+    print("=" * 70 + "\n")
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
