@@ -86,12 +86,12 @@ def fetch_all_events():
         
         # Check if we should use ScraperAPI
         proxy_api_key = os.getenv('PROXY_API_KEY')
-        
+
         if proxy_api_key:
             print(f"Using ScraperAPI with key: {proxy_api_key[:10]}...")
-            # Add render=true to execute JavaScript and handle cookies
-            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}&render=true'
-            print(f"Fetching from ScraperAPI with JS rendering...")
+            # Add premium=true for protected domains
+            proxy_url = f'http://api.scraperapi.com?api_key={proxy_api_key}&url={url}&render=true&premium=true'
+            print(f"Fetching from ScraperAPI with JS rendering (premium mode)...")
             response = requests.get(proxy_url, timeout=60)
         else:
             print(f"Fetching directly from: {url}")

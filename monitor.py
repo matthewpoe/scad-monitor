@@ -100,18 +100,17 @@ class TicketMonitor:
             'Sec-Fetch-Site': 'none',
             'Cache-Control': 'max-age=0',
         }
-    
+
     def fetch_page(self, url):
         """Fetch page with proxy rotation if enabled"""
-        headers = self.get_random_headers()
-        
         try:
             if self.proxy_api_key:
-                proxy_url = f'http://api.scraperapi.com?api_key={self.proxy_api_key}&url={url}'
-                response = requests.get(proxy_url, headers=headers, timeout=30)
+                proxy_url = f'http://api.scraperapi.com?api_key={self.proxy_api_key}&url={url}&render=true&premium=true'
+                response = requests.get(proxy_url, timeout=60)
             else:
-                response = requests.get(url, headers=headers, timeout=30)
-            
+                headers = self.get_random_headers()
+                response = requests.get(url, headers=headers, timeout=60)
+
             response.raise_for_status()
             return response.text
         except Exception as e:
