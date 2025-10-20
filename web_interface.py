@@ -91,14 +91,14 @@ def fetch_all_events():
             params = {
                 'api_key': scrapingbee_key,
                 'url': url,
-                'render_js': 'true',
-                'premium_proxy': 'true',
-                'country_code': 'us',
-                'wait': '5000',  # Wait 5 seconds for JS to load
-                'wait_for': '.tn-prod-list-item'  # Wait for this element
+                'render_js': 'true',  # 5 credits
+                'premium_proxy': 'true',  # 10 credits
+                'country_code': 'us'
+                # Removed: 'wait' and 'wait_for' (these add +10 credits)
             }
             response = requests.get(api_url, params=params, timeout=90)
             print(f"ScrapingBee response: {response.status_code}")
+            print(f"Credits used: ~15 (without wait parameters)")
         else:
             print("No API key, using cloudscraper...")
             import cloudscraper
