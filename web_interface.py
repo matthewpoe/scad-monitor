@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import re
 import hashlib
 from flask import send_file
+import requests
 
 app = Flask(__name__)
 
@@ -16,29 +17,99 @@ EVENTS_CACHE_FILE = 'events_cache.json'
 CACHE_DURATION_HOURS = 6
 IMAGE_CACHE_DIR = '/tmp/image_cache'
 
+
 def load_config():
-    """Load configuration from file"""
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    return {
-        'monitored_events': [],
-        'purchased_events': [],
-        'credentials': {
-            'pushover_user_key': '',
-            'pushover_app_token': '',
-            'gmail_user': '',
-            'gmail_app_password': '',
-            'notify_email': '',
-            'proxy_api_key': ''
-        },
-        'check_interval_minutes': 45
-    }
+    """Load configuration from GitHub Gist"""
+    gist_id = os.getenv('GIST_ID')
+    github_token = os.getenv('GITHUB_TOKEN')
+
+    if not gist_id or not github_token:
+        print("⚠️ No GIST_ID or GITHUB_TOKEN - using defaults")
+        return {
+            'monitored_events': [],
+            'purchased_events': [],
+            'credentials': {
+                'pushover_user_key': '',
+                'pushover_app_token': '',
+                'gmail_user': '',
+                'gmail_app_password': '',
+                'notify_email': '',
+                'proxy_api_key': ''
+            },
+            'check_interval_minutes': 15
+        }
+
+    try:
+        print(f"Loading config from GitHub Gist: {gist_id[:8]}...")
+        url = f'https://api.github.com/gists/{gist_id}'
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        gist_data = response.json()
+        config_content = gist_data['files']['monitor_config.json']['content']
+        config = json.loads(config_content)
+
+        print("✅ Config loaded from GitHub Gist")
+        return config
+
+    except Exception as e:
+        print(f"❌ Error loading config from Gist: {e}")
+        print("Using default config")
+        return {
+            'monitored_events': [],
+            'purchased_events': [],
+            'credentials': {
+                'pushover_user_key': '',
+                'pushover_app_token': '',
+                'gmail_user': '',
+                'gmail_app_password': '',
+                'notify_email': '',
+                'proxy_api_key': ''
+            },
+            'check_interval_minutes': 15
+        }
+
 
 def save_config(config):
-    """Save configuration to file"""
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    """Save configuration to GitHub Gist"""
+    gist_id = os.getenv('GIST_ID')
+    github_token = os.getenv('GITHUB_TOKEN')
+
+    if not gist_id or not github_token:
+        print("⚠️ No GIST_ID or GITHUB_TOKEN - cannot save config")
+        return False
+
+    try:
+        print(f"Saving config to GitHub Gist: {gist_id[:8]}...")
+        url = f'https://api.github.com/gists/{gist_id}'
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        }
+
+        data = {
+            'files': {
+                'monitor_config.json': {
+                    'content': json.dumps(config, indent=2)
+                }
+            }
+        }
+
+        response = requests.patch(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+
+        print("✅ Config saved to GitHub Gist")
+        return True
+
+    except Exception as e:
+        print(f"❌ Error saving config to Gist: {e}")
+        return False
 
 def load_events_cache():
     """Load cached events"""

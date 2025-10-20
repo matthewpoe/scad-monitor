@@ -37,19 +37,45 @@ class TicketMonitor:
         self.previous_states = {}
         self.event_dates = {}
         self.load_state()
-    
+
     def load_config(self):
-        """Load configuration from file"""
-        # Use /data directory if on Render, otherwise local
-        config_file = '/data/monitor_config.json' if os.path.exists('/data') else 'monitor_config.json'
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
-                return json.load(f)
-        return {
-            'monitored_events': [],
-            'credentials': {},
-            'check_interval_minutes': 45
-        }
+        """Load configuration from GitHub Gist"""
+        gist_id = os.getenv('GIST_ID')
+        github_token = os.getenv('GITHUB_TOKEN')
+
+        if not gist_id or not github_token:
+            print("⚠️ No GIST_ID or GITHUB_TOKEN - using defaults")
+            return {
+                'monitored_events': [],
+                'credentials': {},
+                'check_interval_minutes': 15
+            }
+
+        try:
+            print(f"Loading config from GitHub Gist...")
+            url = f'https://api.github.com/gists/{gist_id}'
+            headers = {
+                'Authorization': f'token {github_token}',
+                'Accept': 'application/vnd.github.v3+json'
+            }
+
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            gist_data = response.json()
+            config_content = gist_data['files']['monitor_config.json']['content']
+            config = json.loads(config_content)
+
+            print("✅ Config loaded from GitHub Gist")
+            return config
+
+        except Exception as e:
+            print(f"❌ Error loading config from Gist: {e}")
+            return {
+                'monitored_events': [],
+                'credentials': {},
+                'check_interval_minutes': 15
+            }
         
     def load_state(self):
         """Load previous states from file if exists"""
