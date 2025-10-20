@@ -89,10 +89,12 @@ def fetch_all_events():
                 'api_key': scrapingbee_key,
                 'url': url,
                 'render_js': 'true',
-                'premium_proxy': 'true',  # IP rotation
-                'country_code': 'us'
+                'premium_proxy': 'true',
+                'country_code': 'us',
+                'wait': '5000',  # Wait 5 seconds for JS to load
+                'wait_for': '.tn-prod-list-item'  # Wait for this element
             }
-            response = requests.get(api_url, params=params, timeout=60)
+            response = requests.get(api_url, params=params, timeout=90)
             print(f"ScrapingBee response: {response.status_code}")
         else:
             print("No API key, using cloudscraper...")
@@ -102,19 +104,48 @@ def fetch_all_events():
 
         print(f"Response length: {len(response.text)} characters")
 
-        if 'tn-prod-list-item' in response.text:
-            print("✓ Found event classes!")
-        else:
-            print("⚠️ No event classes found")
-            print("First 500 chars:", response.text[:500])
-
-        response.raise_for_status()
-
+        # More detailed debugging
         soup = BeautifulSoup(response.text, 'html.parser')
-        events = []
 
+        # Check for different possible class names
+        checks = [
+            ('tn-prod-list-item', 'li'),
+            ('event', 'div'),
+            ('performance', 'div'),
+            ('prod-list', 'ul'),
+        ]
+
+        print("\n=== HTML Structure Debug ===")
+        for class_name, tag in checks:
+            found = soup.find_all(tag, class_=lambda x: x and class_name in x if x else False)
+            print(f"Found {len(found)} <{tag}> with '{class_name}' in class")
+            if len(found) > 0:
+                print(f"  Example classes: {found[0].get('class')}")
+
+        # Look for any list items
+        all_li = soup.find_all('li')
+        print(f"\nTotal <li> elements: {len(all_li)}")
+        if len(all_li) > 0:
+            print(f"First <li> classes: {all_li[0].get('class')}")
+
+        # Save full HTML for inspection
+        print("\n=== Saving full HTML to check ===")
+        with open('/tmp/scad_page.html', 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        print("Saved to /tmp/scad_page.html")
+
+        # Look for the actual content
+        print("\n=== Searching for common patterns ===")
+        if 'sold out' in response.text.lower():
+            print("✓ Found 'sold out' text")
+        if 'buy ticket' in response.text.lower():
+            print("✓ Found 'buy ticket' text")
+        if 'scad' in response.text.lower():
+            print("✓ Found 'scad' text")
+
+        events = []
         event_items = soup.find_all('li', class_='tn-prod-list-item')
-        print(f"Found {len(event_items)} event items")
+        print(f"\nFound {len(event_items)} event items with exact class match")
 
         if len(event_items) == 0:
             print("⚠️ No event items found! Possible causes:")
