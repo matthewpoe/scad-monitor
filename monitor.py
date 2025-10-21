@@ -141,18 +141,65 @@ class TicketMonitor:
             'Cache-Control': 'max-age=0',
         }
 
-    def get_chrome_driver(self):
-        """Create a headless Chrome driver"""
+    def get_chrome_driver():
+        """Create a headless Chrome driver with robust options for containerized environments"""
         chrome_options = Options()
-        chrome_options.add_argument('--headless')
+
+        # Headless mode
+        chrome_options.add_argument('--headless=new')  # Use new headless mode
+
+        # Security and sandboxing
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+
+        # GPU and rendering
         chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        chrome_options.add_argument('--disable-software-rasterizer')
+
+        # Extensions and automation
+        chrome_options.add_argument('--disable-extensions')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        return webdriver.Chrome(options=chrome_options)
+        # Window size
+        chrome_options.add_argument('--window-size=1920,1080')
+
+        # User agent
+        chrome_options.add_argument(
+            'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+
+        # Additional stability options for containers
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--disable-dev-tools')
+        chrome_options.add_argument('--no-zygote')
+        chrome_options.add_argument('--single-process')  # Important for low-resource containers
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+
+        # Memory management
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-breakpad')
+        chrome_options.add_argument('--disable-component-extensions-with-background-pages')
+        chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
+        chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--enable-features=NetworkService,NetworkServiceInProcess')
+        chrome_options.add_argument('--force-color-profile=srgb')
+        chrome_options.add_argument('--hide-scrollbars')
+        chrome_options.add_argument('--metrics-recording-only')
+        chrome_options.add_argument('--mute-audio')
+
+        # Logging
+        chrome_options.add_argument('--log-level=3')  # Suppress most logs
+
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            return driver
+        except Exception as e:
+            print(f"Error creating Chrome driver: {e}")
+            raise
 
     def fetch_page(self, url):
         """Fetch page with Selenium"""
