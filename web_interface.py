@@ -1,314 +1,201 @@
-from flask import Flask, render_template_string, request, jsonify
-import json
+"""
+SCAD Film Festival Ticket Monitor - Web Interface
+
+Flask web application for browsing events, configuring monitoring,
+and managing ticket purchases with schedule conflict detection.
+"""
+
 import os
-from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
+import json
+import logging
 import hashlib
-from flask import send_file
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+
 import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from chrome_utils import get_chrome_driver
+from flask import Flask, render_template_string, request, jsonify, send_file
+
+from config_utils import load_config, save_config, update_env_from_config
+from scraper_utils import fetch_all_events
+from constants import (
+    EVENTS_CACHE_FILE,
+    CACHE_DURATION_HOURS,
+    IMAGE_CACHE_DIR,
+    EVENT_DURATION_MINUTES,
+    DEFAULT_TIMEOUT_SECONDS
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-CONFIG_FILE = 'monitor_config.json'
-STATE_FILE = 'state.json'
-EVENTS_CACHE_FILE = 'events_cache.json'
-CACHE_DURATION_HOURS = 6
-IMAGE_CACHE_DIR = '/tmp/image_cache'
 
+def load_events_cache() -> Optional[List[Dict[str, Any]]]:
+    """
+    Load cached events from file
 
-def load_config():
-    """Load configuration from GitHub Gist"""
-    gist_id = os.getenv('GIST_ID')
-    github_token = os.getenv('GITHUB_TOKEN')
-
-    if not gist_id or not github_token:
-        print("⚠️ No GIST_ID or GITHUB_TOKEN - using defaults")
-        return {
-            'monitored_events': [],
-            'purchased_events': [],
-            'credentials': {
-                'pushover_user_key': '',
-                'pushover_app_token': '',
-                'gmail_user': '',
-                'gmail_app_password': '',
-                'notify_email': '',
-                'proxy_api_key': ''
-            },
-            'check_interval_minutes': 15,
-            'send_test_notifications': False,
-            'notify_all_available': False
-        }
+    Returns:
+        List of events if cache is valid, None if cache expired or missing
+    """
+    if not os.path.exists(EVENTS_CACHE_FILE):
+        logger.debug("No events cache file found")
+        return None
 
     try:
-        print(f"Loading config from GitHub Gist: {gist_id[:8]}...")
-        url = f'https://api.github.com/gists/{gist_id}'
-        headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github.v3+json'
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        gist_data = response.json()
-        config_content = gist_data['files']['monitor_config.json']['content']
-        config = json.loads(config_content)
-
-        print("✅ Config loaded from GitHub Gist")
-        return config
-
-    except Exception as e:
-        print(f"❌ Error loading config from Gist: {e}")
-        print("Using default config")
-        return {
-            'monitored_events': [],
-            'purchased_events': [],
-            'credentials': {
-                'pushover_user_key': '',
-                'pushover_app_token': '',
-                'gmail_user': '',
-                'gmail_app_password': '',
-                'notify_email': '',
-                'proxy_api_key': ''
-            },
-            'check_interval_minutes': 15,
-            'send_test_notifications': False,
-            'notify_all_available': False
-        }
-
-
-def save_config(config):
-    """Save configuration to GitHub Gist"""
-    gist_id = os.getenv('GIST_ID')
-    github_token = os.getenv('GITHUB_TOKEN')
-
-    if not gist_id or not github_token:
-        print("⚠️ No GIST_ID or GITHUB_TOKEN - cannot save config")
-        return False
-
-    try:
-        print(f"Saving config to GitHub Gist: {gist_id[:8]}...")
-        url = f'https://api.github.com/gists/{gist_id}'
-        headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        }
-
-        data = {
-            'files': {
-                'monitor_config.json': {
-                    'content': json.dumps(config, indent=2)
-                }
-            }
-        }
-
-        response = requests.patch(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-
-        print("✅ Config saved to GitHub Gist")
-        return True
-
-    except Exception as e:
-        print(f"❌ Error saving config to Gist: {e}")
-        return False
-
-
-def load_events_cache():
-    """Load cached events"""
-    if os.path.exists(EVENTS_CACHE_FILE):
         with open(EVENTS_CACHE_FILE, 'r') as f:
             cache = json.load(f)
             cache_time = datetime.fromisoformat(cache.get('timestamp', '2000-01-01'))
+
             if datetime.now() - cache_time < timedelta(hours=CACHE_DURATION_HOURS):
+                logger.info(f"Using cached events from {cache_time}")
                 return cache.get('events', [])
-    return None
+            else:
+                logger.info("Events cache expired")
+                return None
 
-
-def save_events_cache(events):
-    """Save events to cache"""
-    with open(EVENTS_CACHE_FILE, 'w') as f:
-        json.dump({
-            'timestamp': datetime.now().isoformat(),
-            'events': events
-        }, f, indent=2)
-
-
-def parse_date(date_string):
-    """Parse event date"""
-    if not date_string:
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Error parsing events cache: {e}")
         return None
-    try:
-        formats = ['%A, %B %d, %Y', '%B %d, %Y']
-        for fmt in formats:
-            try:
-                return datetime.strptime(date_string.strip(), fmt)
-            except ValueError:
-                continue
-    except:
-        pass
-    return None
+    except Exception as e:
+        logger.error(f"Error loading events cache: {e}")
+        return None
 
-def fetch_all_events():
-    """Fetch all events from SCAD website using Selenium"""
+
+def save_events_cache(events: List[Dict[str, Any]]) -> None:
+    """
+    Save events to cache file
+
+    Args:
+        events: List of event dictionaries to cache
+    """
+    try:
+        with open(EVENTS_CACHE_FILE, 'w') as f:
+            json.dump({
+                'timestamp': datetime.now().isoformat(),
+                'events': events
+            }, f, indent=2)
+        logger.info(f"Cached {len(events)} events")
+    except Exception as e:
+        logger.error(f"Error saving events cache: {e}")
+
+
+def download_and_cache_image(image_url: str) -> Optional[str]:
+    """
+    Download and cache an image locally
+
+    Args:
+        image_url: URL of the image to download
+
+    Returns:
+        Local filename if successful, None otherwise
+    """
+    if not image_url:
+        return None
+
+    # Create cache directory
+    os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+
+    # Generate filename from URL hash
+    filename = hashlib.md5(image_url.encode()).hexdigest()
+
+    # Determine extension from URL
+    if '.jpg' in image_url or '.jpeg' in image_url:
+        filename += '.jpg'
+    elif '.png' in image_url:
+        filename += '.png'
+    elif '.gif' in image_url:
+        filename += '.gif'
+    else:
+        filename += '.jpg'  # default
+
+    filepath = os.path.join(IMAGE_CACHE_DIR, filename)
+
+    # If already cached, return the cached filename
+    if os.path.exists(filepath):
+        logger.debug(f"Image already cached: {filename}")
+        return filename
+
+    # Download and cache
+    try:
+        logger.info(f"Downloading image: {image_url}")
+        response = requests.get(
+            image_url,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        )
+
+        if response.status_code == 200:
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            logger.info(f"Cached image as: {filename}")
+            return filename
+        else:
+            logger.warning(f"Failed to download image: {response.status_code}")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Network error downloading image {image_url}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error downloading image {image_url}: {e}")
+        return None
+
+
+def fetch_events_with_cache() -> List[Dict[str, Any]]:
+    """
+    Fetch all events, using cache if available
+
+    Returns:
+        List of event dictionaries
+    """
     # Check cache first
     cached = load_events_cache()
     if cached:
-        print(f"Returning {len(cached)} events from cache")
+        logger.info(f"Returning {len(cached)} events from cache")
         return cached
 
-    driver = None
-    try:
-        url = 'https://tickets.scadboxoffice.com/'
-        print(f"Fetching with Selenium: {url}")
+    # Fetch fresh data
+    logger.info("Cache miss - fetching fresh events")
+    events = fetch_all_events()
 
-        driver = get_chrome_driver()
-        driver.get(url)
+    # Cache images and update image URLs
+    for event in events:
+        if event.get('image_url'):
+            original_url = event['image_url']
+            cached_filename = download_and_cache_image(original_url)
+            if cached_filename:
+                event['image_url'] = f'/cached-image/{cached_filename}'
 
-        # Wait for events to load (up to 20 seconds)
-        print("Waiting for events to load...")
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "tn-prod-list-item"))
-        )
+    # Cache the results
+    if events:
+        save_events_cache(events)
 
-        print("Events loaded! Getting page source...")
-
-        # Give it an extra second for images/etc to load
-        import time
-        time.sleep(2)
-
-        html = driver.page_source
-        print(f"Response length: {len(html)} characters")
-
-        soup = BeautifulSoup(html, 'html.parser')
-        events = []
-
-        event_items = soup.find_all('li', class_='tn-prod-list-item')
-        print(f"Found {len(event_items)} event items")
-
-        if len(event_items) == 0:
-            print("⚠️ No event items found!")
-            print("First 500 chars:", html[:500])
-            return []
-
-        for item in event_items:
-            try:
-                event_season_no = item.get('data-tn-prod-season-no', '')
-
-                title_elem = item.find('h4', class_='tn-prod-list-item__property--heading')
-                if not title_elem:
-                    continue
-                title_link = title_elem.find('a')
-                if not title_link:
-                    continue
-                title = title_link.get_text(strip=True)
-
-                # Get description if available
-                desc_elem = item.find('div', class_='tn-prod-list-item__property--description')
-                description = desc_elem.get_text(strip=True)[:200] if desc_elem else ''
-
-                # Get image if available and cache it
-                img_elem = item.find('img')
-                original_image_url = img_elem.get('src', '') if img_elem else ''
-
-                # Make sure image URL is absolute
-                if original_image_url and not original_image_url.startswith('http'):
-                    original_image_url = f'https://tickets.scadboxoffice.com{original_image_url}'
-
-                # Download and cache the image
-                cached_filename = download_and_cache_image(original_image_url) if original_image_url else None
-                image_url = f'/cached-image/{cached_filename}' if cached_filename else ''
-
-                perf_items = item.find_all('li', class_='tn-prod-list-item__perf-list-item')
-
-                for perf in perf_items:
-                    try:
-                        perf_no = perf.get('data-tn-performance-no', '')
-                        perf_link = perf.find('a', class_='tn-prod-list-item__perf-anchor')
-                        if not perf_link:
-                            continue
-
-                        perf_url = perf_link.get('href', '')
-                        if perf_url and not perf_url.startswith('http'):
-                            perf_url = f'https://tickets.scadboxoffice.com{perf_url}'
-
-                        event_id = f"{event_season_no}/{perf_no}"
-
-                        date_elem = perf_link.find('span', class_='tn-prod-list-item__perf-date')
-                        time_elem = perf_link.find('span', class_='tn-prod-list-item__perf-time')
-
-                        date_text = date_elem.get_text(strip=True) if date_elem else None
-                        time_text = time_elem.get_text(strip=True) if time_elem else None
-
-                        datetime_text = f"{date_text} {time_text}" if date_text and time_text else date_text
-                        event_date = parse_date(date_text) if date_text else None
-
-                        status_elem = perf_link.find('span', class_='tn-prod-list-item__perf-status')
-                        action_elem = perf_link.find('span', class_='tn-prod-list-item__perf-action')
-
-                        if status_elem and 'Sold Out' in status_elem.get_text():
-                            status = 'sold_out'
-                        elif action_elem and 'Buy tickets' in action_elem.get_text():
-                            status = 'available'
-                        else:
-                            status = 'unknown'
-
-                        # Skip events that have already passed
-                        if event_date and event_date < datetime.now() - timedelta(days=1):
-                            continue
-
-                        events.append({
-                            'id': event_id,
-                            'title': title,
-                            'description': description,
-                            'image_url': image_url,
-                            'url': perf_url,
-                            'datetime_text': datetime_text,
-                            'date': event_date.isoformat() if event_date else None,
-                            'date_text': date_text,
-                            'time_text': time_text,
-                            'status': status
-                        })
-                    except Exception as e:
-                        print(f"Error parsing performance: {e}")
-                        continue
-
-            except Exception as e:
-                print(f"Error parsing event item: {e}")
-                continue
-
-        # Sort by date
-        events.sort(key=lambda x: x['date'] if x['date'] else '9999')
-
-        print(f"✅ Successfully parsed {len(events)} events")
-
-        # Cache the results
-        if len(events) > 0:
-            save_events_cache(events)
-
-        return events
-
-    except Exception as e:
-        print(f"❌ Error fetching events: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-
-    finally:
-        if driver:
-            driver.quit()
-            print("Chrome driver closed")
+    return events
 
 
-def check_conflicts(events, monitored_ids, purchased_ids):
-    """Check for time conflicts between events"""
+def check_conflicts(
+        events: List[Dict[str, Any]],
+        monitored_ids: List[str],
+        purchased_ids: List[str]
+) -> List[Dict[str, Any]]:
+    """
+    Check for time conflicts between events
+
+    Args:
+        events: List of all event dictionaries
+        monitored_ids: List of monitored event IDs
+        purchased_ids: List of purchased event IDs
+
+    Returns:
+        List of conflict dictionaries with severity levels
+    """
     conflicts = []
 
     # Create a map of event_id to event data
@@ -334,15 +221,18 @@ def check_conflicts(events, monitored_ids, purchased_ids):
                 dt1 = datetime.fromisoformat(date1)
                 dt2 = datetime.fromisoformat(date2)
 
-                # Check if events overlap
-                # Assume each event is 2.5 hours long (150 minutes)
-                # Events conflict if start times are within 150 minutes of each other
+                # Calculate time difference
                 time_diff = abs((dt1 - dt2).total_seconds() / 60)
 
-                if time_diff < 150:  # 2.5 hours
-                    severity = 'critical' if (id1 in purchased_ids and id2 in purchased_ids) else \
-                        'warning' if (id1 in purchased_ids or id2 in purchased_ids) else \
-                            'info'
+                # Events conflict if within EVENT_DURATION_MINUTES of each other
+                if time_diff < EVENT_DURATION_MINUTES:
+                    # Determine severity
+                    if id1 in purchased_ids and id2 in purchased_ids:
+                        severity = 'critical'
+                    elif id1 in purchased_ids or id2 in purchased_ids:
+                        severity = 'warning'
+                    else:
+                        severity = 'info'
 
                     conflicts.append({
                         'event1': event1,
@@ -350,64 +240,32 @@ def check_conflicts(events, monitored_ids, purchased_ids):
                         'severity': severity,
                         'time_diff_minutes': int(time_diff)
                     })
-            except:
+
+            except ValueError as e:
+                logger.warning(f"Error parsing dates for conflict check: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Unexpected error checking conflict: {e}")
                 continue
 
+    logger.info(f"Found {len(conflicts)} schedule conflicts")
     return conflicts
 
 
-def download_and_cache_image(image_url):
-    """Download and cache an image, return local path"""
-    if not image_url:
-        return None
-
-    # Create cache directory
-    os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
-
-    # Generate filename from URL hash
-    filename = hashlib.md5(image_url.encode()).hexdigest()
-
-    # Determine extension from URL
-    if '.jpg' in image_url or '.jpeg' in image_url:
-        filename += '.jpg'
-    elif '.png' in image_url:
-        filename += '.png'
-    elif '.gif' in image_url:
-        filename += '.gif'
-    else:
-        filename += '.jpg'  # default
-
-    filepath = os.path.join(IMAGE_CACHE_DIR, filename)
-
-    # If already cached, return the cached filename
-    if os.path.exists(filepath):
-        return filename
-
-    # Download and cache
-    try:
-        print(f"Downloading image: {image_url}")
-        response = requests.get(image_url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-
-        if response.status_code == 200:
-            with open(filepath, 'wb') as f:
-                f.write(response.content)
-            print(f"Cached image as: {filename}")
-            return filename
-        else:
-            print(f"Failed to download image: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"Error downloading image {image_url}: {e}")
-        return None
-
-
 @app.route('/cached-image/<filename>')
-def serve_cached_image(filename):
-    """Serve a cached image"""
+def serve_cached_image(filename: str):
+    """
+    Serve a cached image file
+
+    Args:
+        filename: Name of the cached image file
+
+    Returns:
+        Image file or 404 if not found
+    """
     # Security: only allow expected filenames (hash + extension)
     if not filename or '..' in filename or '/' in filename:
+        logger.warning(f"Rejected invalid filename: {filename}")
         return '', 404
 
     filepath = os.path.join(IMAGE_CACHE_DIR, filename)
@@ -423,9 +281,109 @@ def serve_cached_image(filename):
 
         return send_file(filepath, mimetype=mimetype)
 
+    logger.warning(f"Cached image not found: {filename}")
     return '', 404
 
 
+@app.route('/')
+def index():
+    """Render the main web interface"""
+    config = load_config()
+    return render_template_string(
+        HTML_TEMPLATE,
+        config=config,
+        config_json=json.dumps(config)
+    )
+
+
+@app.route('/api/events')
+def get_events():
+    """
+    API endpoint to get all events
+
+    Query params:
+        refresh: If 'true', force refresh from website
+
+    Returns:
+        JSON with events list
+    """
+    refresh = request.args.get('refresh') == 'true'
+
+    if refresh:
+        logger.info("Force refresh requested - deleting cache")
+        # Force refresh by deleting cache
+        if os.path.exists(EVENTS_CACHE_FILE):
+            os.remove(EVENTS_CACHE_FILE)
+
+    events = fetch_events_with_cache()
+    return jsonify({'events': events})
+
+
+@app.route('/api/save-config', methods=['POST'])
+def save_config_api():
+    """
+    API endpoint to save configuration
+
+    Expects JSON body with configuration dictionary
+
+    Returns:
+        JSON with success status
+    """
+    try:
+        config = request.json
+
+        if not config:
+            return jsonify({'success': False, 'error': 'No config provided'}), 400
+
+        success = save_config(config)
+
+        if success:
+            # Update environment variables for the monitor
+            update_env_from_config(config)
+            logger.info("Configuration saved successfully")
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to save config'}), 500
+
+    except Exception as e:
+        logger.error(f"Error saving config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/conflicts')
+def get_conflicts():
+    """
+    API endpoint to get schedule conflicts
+
+    Returns:
+        JSON with conflicts list and counts
+    """
+    try:
+        config = load_config()
+        events = fetch_events_with_cache()
+
+        monitored = config.get('monitored_events', [])
+        purchased = config.get('purchased_events', [])
+
+        conflicts = check_conflicts(events, monitored, purchased)
+
+        return jsonify({
+            'conflicts': conflicts,
+            'monitored_count': len(monitored),
+            'purchased_count': len(purchased)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting conflicts: {e}")
+        return jsonify({
+            'conflicts': [],
+            'monitored_count': 0,
+            'purchased_count': 0,
+            'error': str(e)
+        }), 500
+
+
+# HTML template (keeping the existing template from the original file)
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
@@ -1137,7 +1095,6 @@ HTML_TEMPLATE = '''
             if (conflicts.length > 0) {
                 cardClass += ' has-conflict';
 
-                // Separate purchased and monitored conflicts
                 const purchasedConflicts = conflicts.filter(c => {
                     const otherEvent = c.event1.id === event.id ? c.event2 : c.event1;
                     return config.purchased_events.includes(otherEvent.id);
@@ -1160,7 +1117,6 @@ HTML_TEMPLATE = '''
 
                 conflictBadge = `<div class="conflict-badge ${highestSeverity}">${icons[highestSeverity]} ${conflicts.length} conflict${conflicts.length > 1 ? 's' : ''}</div>`;
 
-                // Always show purchased conflicts
                 const purchasedDetails = purchasedConflicts.map(conflict => {
                     const otherEvent = conflict.event1.id === event.id ? conflict.event2 : conflict.event1;
                     return `
@@ -1173,7 +1129,6 @@ HTML_TEMPLATE = '''
                     `;
                 }).join('');
 
-                // Collapse monitored conflicts if more than 2
                 let monitoredDetails = '';
                 if (monitoredConflicts.length > 0) {
                     if (monitoredConflicts.length <= 2) {
@@ -1189,7 +1144,6 @@ HTML_TEMPLATE = '''
                             `;
                         }).join('');
                     } else {
-                        // Collapsed view
                         const titles = monitoredConflicts.map(c => {
                             const otherEvent = c.event1.id === event.id ? c.event2 : c.event1;
                             return otherEvent.title;
@@ -1255,7 +1209,6 @@ HTML_TEMPLATE = '''
                 config.purchased_events.splice(index, 1);
             } else {
                 config.purchased_events.push(eventId);
-                // Remove from monitored if added to purchased
                 const monIndex = config.monitored_events.indexOf(eventId);
                 if (monIndex > -1) {
                     config.monitored_events.splice(monIndex, 1);
@@ -1321,7 +1274,6 @@ HTML_TEMPLATE = '''
                 }).join('');
             }
 
-            // Render schedule
             const scheduleContainer = document.getElementById('schedule-container');
             const allScheduled = [
                 ...config.purchased_events.map(id => ({id, type: 'purchased'})),
@@ -1374,74 +1326,19 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-
-@app.route('/')
-def index():
-    config = load_config()
-    return render_template_string(
-        HTML_TEMPLATE,
-        config=config,
-        config_json=json.dumps(config)
-    )
-
-
-@app.route('/api/events')
-def get_events():
-    refresh = request.args.get('refresh') == 'true'
-
-    if refresh:
-        # Force refresh by deleting cache
-        if os.path.exists(EVENTS_CACHE_FILE):
-            os.remove(EVENTS_CACHE_FILE)
-
-    events = fetch_all_events()
-    return jsonify({'events': events})
-
-
-@app.route('/api/save-config', methods=['POST'])
-def save_config_api():
-    config = request.json
-    save_config(config)
-
-    # Update environment variables for the monitor
-    if 'credentials' in config:
-        for key, value in config['credentials'].items():
-            os.environ[key.upper()] = value
-
-    return jsonify({'success': True})
-
-
-@app.route('/api/conflicts')
-def get_conflicts():
-    config = load_config()
-    events = fetch_all_events()
-
-    monitored = config.get('monitored_events', [])
-    purchased = config.get('purchased_events', [])
-
-    conflicts = check_conflicts(events, monitored, purchased)
-
-    return jsonify({
-        'conflicts': conflicts,
-        'monitored_count': len(monitored),
-        'purchased_count': len(purchased)
-    })
-
-
 if __name__ == '__main__':
-    print("\n" + "=" * 70)
-    print("SCAD Ticket Monitor Web Interface")
-    print("=" * 70)
-    print("\nStarting web interface at: http://localhost:5000")
-    print("\nFeatures:")
-    print("  • Browse all SCAD film festival events")
-    print("  • Select events to monitor for tickets")
-    print("  • Mark purchased events")
-    print("  • Automatic schedule conflict detection")
-    print("  • Test notifications")
-    print("\nOpen this URL in your browser to get started.")
-    print("Press Ctrl+C to stop the server.")
-    print("=" * 70 + "\n")
+    logger.info("=" * 70)
+    logger.info("SCAD Ticket Monitor Web Interface")
+    logger.info("=" * 70)
+    logger.info("\nStarting web interface...")
+    logger.info("\nFeatures:")
+    logger.info("  • Browse all SCAD film festival events")
+    logger.info("  • Select events to monitor for tickets")
+    logger.info("  • Mark purchased events")
+    logger.info("  • Automatic schedule conflict detection")
+    logger.info("  • Test notifications")
+    logger.info("\nPress Ctrl+C to stop the server.")
+    logger.info("=" * 70 + "\n")
 
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
