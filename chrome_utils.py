@@ -3,8 +3,53 @@ Shared Chrome/Selenium utilities for SCAD Ticket Monitor
 Used by both web_interface.py and monitor.py
 """
 
+import os
+import shutil
+import subprocess
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+
+
+def clear_chromedriver_cache():
+    """
+    Clear the Selenium ChromeDriver cache to force fresh download.
+    
+    This fixes issues where a cached ChromeDriver doesn't match the 
+    installed Chrome version, causing exit code -5 crashes.
+    """
+    cache_dir = os.path.expanduser('~/.cache/selenium')
+    if os.path.exists(cache_dir):
+        print(f"🗑️  Clearing ChromeDriver cache at {cache_dir}")
+        try:
+            shutil.rmtree(cache_dir)
+            print("✅ Cache cleared successfully")
+        except Exception as e:
+            print(f"⚠️  Failed to clear cache: {e}")
+
+
+def get_chrome_version():
+    """
+    Get the installed Chrome version.
+    
+    Returns:
+        str: Chrome version (e.g., "141.0.7390.122") or None if not found
+    """
+    try:
+        result = subprocess.run(
+            ['google-chrome', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        version_str = result.stdout.strip()
+        # Extract version number from "Google Chrome 141.0.7390.122"
+        version = version_str.split()[-1] if version_str else None
+        print(f"📦 Detected Chrome version: {version}")
+        return version
+    except Exception as e:
+        print(f"⚠️  Could not detect Chrome version: {e}")
+        return None
 
 
 def get_chrome_driver():
@@ -12,6 +57,8 @@ def get_chrome_driver():
     Create a headless Chrome driver with robust options for containerized environments.
     
     Optimized for Railway deployment with:
+    - Automatic ChromeDriver version matching
+    - Cache clearing on startup to prevent version mismatches
     - Low memory footprint (--single-process)
     - Container-safe options (--no-sandbox, --disable-dev-shm-usage)
     - Stealth options to avoid bot detection
@@ -22,6 +69,31 @@ def get_chrome_driver():
     Raises:
         Exception: If Chrome driver fails to initialize
     """
+    # Check for version mismatch and clear cache if needed
+    cache_dir = os.path.expanduser('~/.cache/selenium/chromedriver')
+    if os.path.exists(cache_dir):
+        print("🔧 Checking ChromeDriver cache for version mismatches...")
+        chrome_version = get_chrome_version()
+        if chrome_version:
+            # List cached versions
+            try:
+                linux64_dir = os.path.join(cache_dir, 'linux64')
+                if os.path.exists(linux64_dir):
+                    cached_versions = os.listdir(linux64_dir)
+                    print(f"📋 Cached ChromeDriver versions: {cached_versions}")
+                    
+                    # If versions don't match (first 3 numbers), clear cache
+                    chrome_major = '.'.join(chrome_version.split('.')[:3])
+                    version_match = any(chrome_major in v for v in cached_versions)
+                    
+                    if not version_match:
+                        print(f"⚠️  Version mismatch! Chrome {chrome_version} vs cached {cached_versions}")
+                        clear_chromedriver_cache()
+                    else:
+                        print(f"✅ ChromeDriver cache matches Chrome version")
+            except Exception as e:
+                print(f"⚠️  Error checking cache: {e}")
+    
     chrome_options = Options()
     
     # Headless mode
@@ -73,10 +145,31 @@ def get_chrome_driver():
     
     # Logging (suppress verbose output)
     chrome_options.add_argument('--log-level=3')
+    chrome_options.add_argument('--silent')
+    
+    # Additional stability options for exit code -5 issues
+    chrome_options.add_argument('--disable-crash-reporter')
+    chrome_options.add_argument('--no-first-run')
+    chrome_options.add_argument('--no-default-browser-check')
+    chrome_options.add_argument('--disable-translate')
+    chrome_options.add_argument('--disable-sync')
     
     try:
+        print("🚀 Starting Chrome WebDriver...")
         driver = webdriver.Chrome(options=chrome_options)
+        print("✅ Chrome WebDriver started successfully")
         return driver
     except Exception as e:
         print(f"❌ Error creating Chrome driver: {e}")
-        raise
+        
+        # If driver creation fails, try clearing cache and retry once
+        print("🔄 Attempting recovery: clearing cache and retrying...")
+        clear_chromedriver_cache()
+        
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            print("✅ Chrome WebDriver started successfully after cache clear")
+            return driver
+        except Exception as retry_error:
+            print(f"❌ Retry failed: {retry_error}")
+            raise
