@@ -15,18 +15,17 @@ def get_chrome_driver():
     - Low memory footprint (--single-process)
     - Container-safe options (--no-sandbox, --disable-dev-shm-usage)
     - Stealth options to avoid bot detection
-    - Automatic cache recovery on failure
     
     Returns:
         webdriver.Chrome: Configured Chrome WebDriver instance
     
     Raises:
-        Exception: If Chrome driver fails to initialize even after recovery attempt
+        Exception: If Chrome driver fails to initialize
     """
     chrome_options = Options()
     
     # Headless mode
-    chrome_options.add_argument('--headless=new')  # Use new headless mode
+    chrome_options.add_argument('--headless=new')
     
     # Security and sandboxing (required for containers)
     chrome_options.add_argument('--no-sandbox')
@@ -55,7 +54,7 @@ def get_chrome_driver():
     # Container stability options
     chrome_options.add_argument('--disable-dev-tools')
     chrome_options.add_argument('--no-zygote')
-    chrome_options.add_argument('--single-process')  # Critical for low-resource containers
+    chrome_options.add_argument('--single-process')
     
     # Memory and performance optimization
     chrome_options.add_argument('--disable-background-networking')
